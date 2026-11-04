@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/nail/auth'
 import { db } from '@/lib/nail/db'
 import { readStoredFile } from '@/lib/nail/storage'
+import { readStyleReference } from '@/lib/nail/image-provider'
 
 export const runtime = 'nodejs'
 
@@ -18,7 +19,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const path = kind === 'hand' ? generation.inputHandPath : kind === 'style' ? generation.inputStylePath : generation.outputPath
   if (!path) return new NextResponse('Not found', { status: 404 })
   try {
-    const bytes = new Uint8Array(await readStoredFile(path))
+    const bytes = new Uint8Array(await (kind === 'style' ? readStyleReference(path) : readStoredFile(path)))
     const headers = new Headers({
       'Content-Type': 'image/png',
       'Cache-Control': 'private, no-store',

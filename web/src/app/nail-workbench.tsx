@@ -122,6 +122,15 @@ export function NailWorkbench({ user }: { user: NailUser }) {
   }, [loadTask, searchParams])
 
   useEffect(() => {
+    if (!searchParams.get('task') || !generation?.inputStylePath) return
+    const savedStyle = styles.find(item => item.imagePath === generation.inputStylePath)
+    if (savedStyle) {
+      setStyleId(savedStyle.id)
+      setStyleName(savedStyle.name)
+    }
+  }, [generation?.inputStylePath, searchParams, styles])
+
+  useEffect(() => {
     if (!generationId || generation?.status === 'success' || generation?.status === 'refunded') return
     let active = true
     const started = Date.now()
