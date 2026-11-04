@@ -1,0 +1,24 @@
+# Build from repository root after git submodule update --init vendor/new-api.
+FROM oven/bun:1.4.0 AS web
+WORKDIR /src/web
+COPY vendor/new-api/web/ ./
+RUN bun install --frozen-lockfile
+RUN DISABLE_ESLINT_PLUGIN=true VITE_REACT_APP_VERSION=v1.0.0-rc.47 bun run build
+
+FROM golang:1.26.10-alpine AS build
+ENV CGO_ENABLED=0 GOWORK=off GOMAXPROCS=2
+WORKDIR /src
+COPY vendor/new-api/ ./
+COPY deploy/new-api-codexing.patch /tmp/compat.patch
+RUN apk add --no-cache git && git apply /tmp/compat.patch
+COPY --from=web /src/web/dist ./web/dist
+RUN go test -p 2 ./relay/channel/openai && \
+    go build -p 2 -ldflags "-s -w -X github.com/QuantumNous/new-api/common.Version=v1.0.0-rc.47-nail" -o /new-api
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata libasan8 wget \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /new-api /new-api
+COPY --from=build /src/LICENSE /src/NOTICE /src/THIRD-PARTY-LICENSES.md /licenses/
+WORKDIR /data
+EXPOSE 3000
+ENTRYPOINT ["/new-api"]

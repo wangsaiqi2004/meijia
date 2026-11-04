@@ -1,0 +1,64 @@
+diff --git a/relay/channel/openai/adaptor.go b/relay/channel/openai/adaptor.go
+index 66e3778..64fbe0d 100644
+--- a/relay/channel/openai/adaptor.go
++++ b/relay/channel/openai/adaptor.go
+@@ -584,9 +584,9 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
+ 					return nil, fmt.Errorf("failed to open image file %d: %w", i, err)
+ 				}
+ 
+-				// If multiple images, use image[] as the field name
++				// Codexing expects repeated image parts, including multi-image edits.
+ 				fieldName := "image"
+-				if len(imageFiles) > 1 {
++				if len(imageFiles) > 1 && !strings.Contains(info.ChannelBaseUrl, "api.codexing.cn") {
+ 					fieldName = "image[]"
+ 				}
+ 
+diff --git a/relay/channel/openai/image_edit_test.go b/relay/channel/openai/image_edit_test.go
+index 0d1a9d8..fd4fc04 100644
+--- a/relay/channel/openai/image_edit_test.go
++++ b/relay/channel/openai/image_edit_test.go
+@@ -96,3 +96,43 @@ func TestConvertImageEditRequestMultipart(t *testing.T) {
+ 		convertAndReplay(t, c, prompt)
+ 	})
+ }
++
++func TestImageEditMultipleImagesPreserveOrder(t *testing.T) {
++	gin.SetMode(gin.TestMode)
++	for _, tc := range []struct {
++		name, baseURL, field string
++	}{
++		{"codexing", "https://api.codexing.cn", "image"},
++		{"openai", "https://api.openai.com", "image[]"},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			var body bytes.Buffer
++			writer := multipart.NewWriter(&body)
++			require.NoError(t, writer.WriteField("model", "gpt-image-2.5-sunburst"))
++			for _, name := range []string{"hand.png", "style.png"} {
++				part, err := writer.CreateFormFile("image", name)
++				require.NoError(t, err)
++				_, err = part.Write([]byte(name))
++				require.NoError(t, err)
++			}
++			require.NoError(t, writer.Close())
++			c, _ := gin.CreateTestContext(httptest.NewRecorder())
++			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", &body)
++			c.Request.Header.Set("Content-Type", writer.FormDataContentType())
++			require.NoError(t, c.Request.ParseMultipartForm(32<<20))
++			info := &relaycommon.RelayInfo{
++				RelayMode:   relayconstant.RelayModeImagesEdits,
++				ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: tc.baseURL},
++			}
++			converted, err := (&Adaptor{}).ConvertImageRequest(c, info, dto.ImageRequest{Model: "gpt-image-2.5-sunburst"})
++			require.NoError(t, err)
++			replayed := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(converted.(*bytes.Buffer).Bytes()))
++			replayed.Header.Set("Content-Type", c.Request.Header.Get("Content-Type"))
++			require.NoError(t, replayed.ParseMultipartForm(32<<20))
++			files := replayed.MultipartForm.File[tc.field]
++			require.Len(t, files, 2)
++			require.Equal(t, "hand.png", files[0].Filename)
++			require.Equal(t, "style.png", files[1].Filename)
++		})
++	}
++}

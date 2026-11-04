@@ -1,0 +1,95 @@
+services:
+  nail-app:
+    build:
+      context: .
+      dockerfile: Dockerfile.nail
+    image: nail-note:${NAIL_VERSION:-local}
+    container_name: nail-note-app
+    restart: unless-stopped
+    init: true
+    mem_limit: 768m
+    cpus: 1.0
+    depends_on:
+      nail-gateway:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${NAIL_PORT:-19125}:3000"
+    volumes:
+      - /www/nail-note/data:/app/data
+    environment:
+      NODE_ENV: production
+      TZ: Asia/Shanghai
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      DATABASE_URL: file:/app/data/nail.db
+      NAIL_DATA_DIR: /app/data
+      SYSTEM_PROMPT_PATH: /app/prompts/system-prompt.md
+      ADMIN_USERNAME: ${ADMIN_USERNAME:?Set ADMIN_USERNAME in the private .env file}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in the private .env file}
+      IMAGE_API_BASE_URL: ${IMAGE_API_BASE_URL:-https://api.codexing.cn/v1}
+      IMAGE_API_KEY: ${IMAGE_API_KEY:-}
+      IMAGE_MODEL: ${IMAGE_MODEL:-gpt-image-2.5-sunburst}
+      TEXT_MODEL: ${TEXT_MODEL-}
+      CRON_SECRET: ${CRON_SECRET:?Set CRON_SECRET in the private .env file}
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/nail/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  nail-cleanup:
+    image: nail-note:${NAIL_VERSION:-local}
+    container_name: nail-note-cleanup
+    restart: unless-stopped
+    init: true
+    mem_limit: 128m
+    depends_on:
+      nail-app:
+        condition: service_healthy
+    command: ["node", "scripts/cleanup-nail.mjs"]
+    environment:
+      NAIL_APP_URL: http://nail-app:3000
+      CRON_SECRET: ${CRON_SECRET:?Set CRON_SECRET in the private .env file}
+    logging:
+      driver: json-file
+      options:
+        max-size: 2m
+        max-file: "2"
+
+  nail-gateway:
+    image: new-api-nail:${GATEWAY_VERSION:-rc47-codexing}
+    container_name: nail-note-gateway
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 1.0
+    ports:
+      - "127.0.0.1:19126:3000"
+    volumes:
+      - /www/nail-note/gateway:/data
+    environment:
+      TZ: Asia/Shanghai
+      SQLITE_PATH: /data/new-api.db
+      SESSION_SECRET: ${GATEWAY_SESSION_SECRET:?Set gateway session secret}
+      MEMORY_CACHE_ENABLED: "true"
+      LOG_SQL_DSN: ""
+      ERROR_LOG_ENABLED: "true"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

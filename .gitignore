@@ -20,6 +20,11 @@ docker-compose-local.yml
 # Environment variables
 .env
 .env.local
+*.local
+*.local.json
+.env.production
+screenshots/
+test-results/
 
 # Database files
 *.db

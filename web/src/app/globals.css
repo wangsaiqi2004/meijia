@@ -1,6 +1,15 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+body { letter-spacing: 0; }
+button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
+:focus-visible { outline: 2px solid #668b76; outline-offset: 3px; }
+.nail-workbench section { border-radius: 0; border-width: 0 0 1px; background: transparent; }
+.nail-workbench [class*="tracking-"] { letter-spacing: 0; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {

@@ -559,13 +559,7 @@ export function ImageComposer({
               value={prompt}
               onChange={(event) => onPromptChange(event.target.value)}
               onPaste={handleTextareaPaste}
-              placeholder={
-                promptOptional
-                  ? "可选：补充要求（例如：保持原图色调、写实风格），留空也可以直接生成"
-                  : referenceImages.length > 0
-                    ? "描述你希望如何修改参考图"
-                    : "输入你想要生成的画面，也可直接粘贴图片"
-              }
+              placeholder="例如：秋冬奶茶棕，低饱和猫眼，日常通勤；无名指加两颗小钻"
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();

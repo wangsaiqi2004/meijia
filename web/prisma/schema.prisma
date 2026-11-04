@@ -1,0 +1,120 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Shop {
+  id           String          @id @default(cuid())
+  name         String
+  city         String          @default("")
+  contact      String          @default("")
+  credits      Int             @default(0)
+  isVip        Boolean         @default(false)
+  vipGrantedAt DateTime?
+  status       String          @default("active")
+  createdAt    DateTime        @default(now())
+  users        User[]
+  generations  Generation[]
+  orders       RechargeOrder[]
+  usedCodes    RedeemCode[]
+}
+
+model User {
+  id           String          @id @default(cuid())
+  shopId       String?
+  shop         Shop?           @relation(fields: [shopId], references: [id])
+  username     String          @unique
+  passwordHash String
+  role         String
+  status       String          @default("active")
+  createdAt    DateTime        @default(now())
+  sessions     Session[]
+  generations  Generation[]
+  orders       RechargeOrder[]
+  createdCodes RedeemCode[]
+}
+
+model Session {
+  id        String   @id
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Generation {
+  id               String    @id @default(cuid())
+  shopId           String
+  shop             Shop      @relation(fields: [shopId], references: [id])
+  userId           String
+  user             User      @relation(fields: [userId], references: [id])
+  idempotencyKey   String
+  mode             String
+  styleName        String
+  extraPrompt      String    @default("")
+  inputHandPath    String?
+  inputStylePath   String?
+  outputPath       String?
+  size             String
+  creditsCost      Int
+  status           String    @default("pending")
+  failReason       String?
+  apiCostCents     Int?
+  notesJson        String?
+  workerStartedAt  DateTime?
+  deletedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  finishedAt       DateTime?
+
+  @@unique([shopId, idempotencyKey])
+  @@index([shopId, createdAt])
+  @@index([status, createdAt])
+}
+
+model RechargeOrder {
+  id          String   @id @default(cuid())
+  outTradeNo  String   @unique
+  shopId      String
+  shop        Shop     @relation(fields: [shopId], references: [id])
+  channel     String
+  amountCents Int      @default(0)
+  credits     Int
+  status      String   @default("success")
+  operatorId  String
+  operator    User     @relation(fields: [operatorId], references: [id])
+  remark      String   @default("")
+  createdAt   DateTime @default(now())
+
+  @@index([shopId, createdAt])
+}
+
+model RedeemCode {
+  id           String    @id @default(cuid())
+  code         String    @unique
+  credits      Int
+  usedByShopId String?
+  usedByShop   Shop?     @relation(fields: [usedByShopId], references: [id])
+  usedAt       DateTime?
+  createdById  String
+  createdBy    User      @relation(fields: [createdById], references: [id])
+  expiresAt    DateTime?
+  createdAt    DateTime  @default(now())
+}
+
+model StyleLibrary {
+  id        String   @id @default(cuid())
+  name      String
+  category  String
+  imagePath String
+  tags      String   @default("")
+  sortOrder Int      @default(0)
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
