@@ -8,7 +8,7 @@ export async function GET(request: Request) {
   const user = await getCurrentUser()
   if (!user?.shopId) return new NextResponse('Unauthorized', { status: 401 })
   const path = new URL(request.url).searchParams.get('path') || ''
-  if (!isShopUpload(path, 'hand', user.shopId) && !isShopUpload(path, 'style', user.shopId)) {
+  if (!['hand', 'style', 'library'].some(kind => isShopUpload(path, kind as 'hand' | 'style' | 'library', user.shopId!))) {
     return new NextResponse('Not found', { status: 404 })
   }
   try {
@@ -26,7 +26,8 @@ export async function POST(request: Request) {
   const form = await request.formData()
   const file = form.get('file')
   const kind = form.get('kind')
-  if (!(file instanceof File) || (user.role === 'admin' ? kind !== 'library' : (kind !== 'hand' && kind !== 'style'))) {
+  const allowedKinds = user.role === 'admin' ? ['library'] : user.role === 'owner' ? ['hand', 'style', 'library'] : ['hand', 'style']
+  if (!(file instanceof File) || !allowedKinds.includes(String(kind))) {
     return NextResponse.json({ error: '上传参数无效' }, { status: 400 })
   }
   try {

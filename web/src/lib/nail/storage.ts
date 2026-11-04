@@ -17,8 +17,8 @@ function safeRelative(value: string): string {
   return normalized
 }
 
-export function isShopUpload(path: string, kind: 'hand' | 'style', shopId: string): boolean {
-  const match = /^uploads\/(hand|style)\/([^/]+)\/\d+-[a-f0-9-]+\.png$/.exec(path)
+export function isShopUpload(path: string, kind: 'hand' | 'style' | 'library', shopId: string): boolean {
+  const match = /^uploads\/(hand|style|library)\/([^/]+)\/\d+-[a-f0-9-]+\.png$/.exec(path)
   return Boolean(match && match[1] === kind && match[2] === shopId)
 }
 
@@ -64,18 +64,18 @@ export async function saveGeneratedImage(buffer: Buffer): Promise<string> {
 
 const previewJobs = new Map<string, Promise<Buffer>>()
 
-export async function readStoredPreview(path: string): Promise<Buffer> {
+export async function readStoredPreview(path: string, detail = false): Promise<Buffer> {
   const absolutePath = join(DATA_DIR, safeRelative(path))
-  const previewPath = `${absolutePath}.preview.webp`
+  const previewPath = `${absolutePath}.${detail ? 'detail' : 'preview'}.webp`
   try { return await readFile(previewPath) } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
   }
-  const existing = previewJobs.get(absolutePath)
+  const existing = previewJobs.get(previewPath)
   if (existing) return existing
   const job = (async () => {
     const image = await sharp(absolutePath, { limitInputPixels: 40_000_000 })
-      .resize(768, 1152, { fit: 'inside', withoutEnlargement: true })
-      .webp({ quality: 84 })
+      .resize(detail ? 1600 : 768, detail ? 2400 : 1152, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: detail ? 90 : 84 })
       .toBuffer()
     const temporaryPath = `${previewPath}.${randomUUID()}.tmp`
     try {
@@ -86,8 +86,8 @@ export async function readStoredPreview(path: string): Promise<Buffer> {
       await rm(temporaryPath, { force: true })
     }
   })()
-  previewJobs.set(absolutePath, job)
-  try { return await job } finally { previewJobs.delete(absolutePath) }
+  previewJobs.set(previewPath, job)
+  try { return await job } finally { previewJobs.delete(previewPath) }
 }
 
 export async function readStoredFile(path: string): Promise<Buffer> {
@@ -97,7 +97,7 @@ export async function readStoredFile(path: string): Promise<Buffer> {
 export async function deleteStoredFile(path?: string | null): Promise<void> {
   if (!path) return
   const absolutePath = join(DATA_DIR, safeRelative(path))
-  await Promise.all([absolutePath, `${absolutePath}.preview.webp`].map(async target => {
+  await Promise.all([absolutePath, `${absolutePath}.preview.webp`, `${absolutePath}.detail.webp`].map(async target => {
     try { await rm(target, { force: true }) } catch {}
   }))
 }

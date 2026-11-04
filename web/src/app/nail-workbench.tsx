@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { Camera, Check, CircleAlert, Download, ImagePlus, LoaderCircle, RefreshCw, Sparkles, Upload, X } from 'lucide-react'
+import { Camera, Check, CircleAlert, Download, ImagePlus, LoaderCircle, Maximize2, RefreshCw, Sparkles, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatPoints, generationImageUrl, nailFetch, requestKey, styleImageUrl, uploadImageUrl, type NailUser } from '@/lib/nail/client'
 import { generationPrice } from '@/lib/nail/pricing'
+import { ImageLightbox } from '@/components/nail/image-lightbox'
+import { ShopStyleManager } from '@/components/nail/shop-style-manager'
 
-type Style = { id: string; name: string; category: string; tags: string; imagePath: string; enabled: boolean }
+type Style = { id: string; shopId?: string | null; name: string; category: string; tags: string; imagePath: string; enabled: boolean }
 type Generation = {
   id: string
   styleName: string
@@ -56,6 +58,15 @@ function FileTile({ title, description, accept, capture, preview, busy, onChange
   </div>
 }
 
+function EnlargedImage({ src, alt, onZoom, className }: {
+  src: string; alt: string; onZoom: () => void; className: string
+}) {
+  return <button type="button" onClick={onZoom} aria-label={`放大查看${alt}`} title="点击放大查看" className="group relative block w-full overflow-hidden">
+    <img src={src} alt={alt} className={className} />
+    <span className="absolute right-2 bottom-2 grid size-7 place-items-center rounded-md bg-black/55 text-white opacity-80 transition group-hover:opacity-100"><Maximize2 className="size-3.5" /></span>
+  </button>
+}
+
 export function NailWorkbench({ user }: { user: NailUser }) {
   const searchParams = useSearchParams()
   const [styles, setStyles] = useState<Style[]>([])
@@ -76,6 +87,7 @@ export function NailWorkbench({ user }: { user: NailUser }) {
   const [generating, setGenerating] = useState(false)
   const [generationId, setGenerationId] = useState('')
   const [generation, setGeneration] = useState<Generation | null>(null)
+  const [lightbox, setLightbox] = useState<{ src: string; title: string } | null>(null)
   const [elapsed, setElapsed] = useState(0)
   const handledTask = useRef('')
   const submitLock = useRef(false)
@@ -84,6 +96,15 @@ export function NailWorkbench({ user }: { user: NailUser }) {
   const price = generationPrice(size, isVip)
 
   const filteredStyles = useMemo(() => styles.filter(item => category === '全部' || item.category === category), [styles, category])
+
+  function onStylesChange(rows: Style[]) {
+    setStyles(rows)
+    if (!stylePath && !rows.some(item => item.id === styleId)) {
+      setStyleId(rows[0]?.id || '')
+      setStyleName(rows[0]?.name || '')
+    }
+    if (category !== '全部' && !rows.some(item => item.category === category)) setCategory('全部')
+  }
 
   useEffect(() => {
     void nailFetch<{ styles: Style[] }>('/api/nail/styles').then(({ styles: rows }) => {
@@ -283,16 +304,20 @@ export function NailWorkbench({ user }: { user: NailUser }) {
             </label>
           </div>
           {stylePath ? <div className="mb-4 flex items-center gap-3 rounded-md border border-[#e1e8e1] bg-[#f6f8f4] p-2.5"><img src={stylePreview || ''} alt="已上传的款式参考图" className="size-14 rounded object-cover" /><span className="min-w-0 flex-1 truncate text-xs font-medium">{styleName}</span><button type="button" onClick={() => { setStylePath(''); setStylePreview(null); setStyleId('') }} className="grid size-8 place-items-center rounded-md text-[#819087] hover:bg-white" aria-label="移除款式图"><X className="size-4" /></button></div> : null}
-          <div className="hide-scrollbar -mx-1 mb-3 flex gap-1.5 overflow-x-auto px-1 pb-1">
+          {user.role === 'owner' ? <ShopStyleManager onStylesChange={onStylesChange} /> : null}
+          <div className="hide-scrollbar -mx-1 mb-3 mt-3 flex gap-1.5 overflow-x-auto px-1 pb-1">
             {categories.map(item => <button key={item} type="button" onClick={() => setCategory(item)} className={`h-8 shrink-0 rounded-md px-3 text-[11px] font-medium transition ${category === item ? 'bg-[#173b32] text-white' : 'bg-[#eff3ee] text-[#697a6f] hover:bg-[#e5ebe4]'}`}>{item}</button>)}
           </div>
           {filteredStyles.length ? <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3">
             {filteredStyles.map(item => {
               const selected = styleId === item.id
-              return <button key={item.id} type="button" aria-pressed={selected} onClick={() => chooseStyle(item)} className={`group overflow-hidden rounded-md border text-left transition ${selected ? 'border-[#47745b] ring-2 ring-[#47745b]/15' : 'border-[#e2e8e1] hover:border-[#a6b9a8]'}`}>
-                <span className="relative block aspect-[4/3] overflow-hidden bg-[#edf0eb]"><img src={styleImageUrl(item.id)} alt="" className="size-full object-cover transition duration-300 group-hover:scale-[1.03]" />{selected ? <span className="absolute right-2 top-2 grid size-6 place-items-center rounded-full bg-[#173b32] text-white"><Check className="size-3.5" /></span> : null}</span>
-                <span className="block p-2.5"><span className="block truncate text-[12px] font-semibold text-[#34483b]">{item.name}</span><span className="mt-1 block truncate text-[10px] text-[#8b998f]">{item.tags.split(',').slice(0, 2).join(' · ')}</span></span>
-              </button>
+              return <article key={item.id} className={`relative overflow-hidden rounded-md border transition ${selected ? 'border-[#47745b] ring-2 ring-[#47745b]/15' : 'border-[#e2e8e1] hover:border-[#a6b9a8]'}`}>
+                <button type="button" aria-pressed={selected} onClick={() => chooseStyle(item)} className="group block w-full text-left">
+                  <span className="relative block aspect-[4/3] overflow-hidden bg-[#edf0eb]"><img src={styleImageUrl(item.id)} alt="" className="size-full object-cover transition duration-300 group-hover:scale-[1.03]" />{selected ? <span className="absolute right-2 top-2 grid size-6 place-items-center rounded-full bg-[#173b32] text-white"><Check className="size-3.5" /></span> : null}</span>
+                  <span className="block p-2.5 pr-9"><span className="block truncate text-[12px] font-semibold text-[#34483b]">{item.name}</span><span className="mt-1 block truncate text-[10px] text-[#8b998f]">{item.tags.split(',').slice(0, 2).join(' · ')}</span></span>
+                </button>
+                <button type="button" title="放大款式图片" aria-label={`放大查看${item.name}`} onClick={() => setLightbox({ src: styleImageUrl(item.id), title: item.name })} className="absolute right-1 bottom-2 grid size-8 place-items-center rounded-sm text-[#6f8275] hover:bg-[#e8eee7]"><Maximize2 className="size-3.5" /></button>
+              </article>
             })}
           </div> : <div className="rounded-md border border-dashed border-[#d7e0d7] py-8 text-center text-xs text-[#8b998f]">这个分类暂时没有款式</div>}
         </section>
@@ -330,8 +355,8 @@ export function NailWorkbench({ user }: { user: NailUser }) {
             {generation.status === 'success' ? <div className="flex gap-2"><a href={`${generationImageUrl(generation.id)}&download=1`} className="flex h-9 items-center gap-1.5 rounded-md border border-[#d8e0d8] bg-white px-3 text-[11px] font-semibold text-[#53685a] hover:border-[#8fa895]"><Download className="size-3.5" />下载</a><button type="button" onClick={reset} className="flex h-9 items-center gap-1.5 rounded-md bg-[#173b32] px-3 text-[11px] font-semibold text-white hover:bg-[#245344]"><RefreshCw className="size-3.5" />换个款式</button></div> : null}
           </div>
           {generation.status === 'pending' ? <div className="grid min-h-48 place-items-center rounded-md bg-[#f1f4ef]"><div className="text-center"><LoaderCircle className="mx-auto size-6 animate-spin text-[#47745b]" /><p className="mt-3 text-sm font-medium text-[#475a4c]">正在生成这只手的款式效果</p><p className="mt-1 text-xs text-[#8b998f]">通常约 30 秒，请稍候</p></div></div> : generation.status === 'success' ? <div className="grid gap-3 sm:grid-cols-2">
-            <figure className="overflow-hidden rounded-md border border-[#e3e9e2] bg-[#f1f4ef]"><figcaption className="px-3 py-2 text-[11px] font-medium text-[#748279]">顾客原手</figcaption><img src={generationImageUrl(generation.id, 'hand')} alt="顾客原手部照片" className="aspect-[4/3] w-full object-contain" /></figure>
-            <figure className="overflow-hidden rounded-md border border-[#e3e9e2] bg-[#f1f4ef]"><figcaption className="px-3 py-2 text-[11px] font-medium text-[#748279]">款式效果 · {generation.styleName}</figcaption><img src={generationImageUrl(generation.id)} alt={`${generation.styleName}美甲效果预览`} className="aspect-[4/3] w-full object-contain" /></figure>
+            <figure className="overflow-hidden rounded-md border border-[#e3e9e2] bg-[#f1f4ef]"><figcaption className="px-3 py-2 text-[11px] font-medium text-[#748279]">顾客原手</figcaption><EnlargedImage src={generationImageUrl(generation.id, 'hand')} alt="顾客原手部照片" onZoom={() => setLightbox({ src: generationImageUrl(generation.id, 'hand'), title: '顾客原手部照片' })} className="aspect-[4/3] w-full object-contain" /></figure>
+            <figure className="overflow-hidden rounded-md border border-[#e3e9e2] bg-[#f1f4ef]"><figcaption className="px-3 py-2 text-[11px] font-medium text-[#748279]">款式效果 · {generation.styleName}</figcaption><EnlargedImage src={generationImageUrl(generation.id)} alt={`${generation.styleName}美甲效果预览`} onZoom={() => setLightbox({ src: generationImageUrl(generation.id, 'result', 'detail'), title: `${generation.styleName}美甲效果预览` })} className="aspect-[4/3] w-full object-contain" /></figure>
           </div> : <div className="rounded-md border border-[#f0d8cb] bg-[#fff7f2] p-4 text-sm text-[#98674f]">{generation.failReason || '生成失败，点数已退回'}</div>}
           {generation.status === 'success' && generation.notes ? <div className="mt-4 border-t border-[#e4e9e3] pt-4">
             <div className="flex items-center justify-between"><h3 className="text-[13px] font-semibold text-[#30483a]">施工参考</h3><span className="text-[10px] text-[#87958c]">{generation.notes.difficulty || '难度未标'} · {generation.notes.estimated_minutes ? `${generation.notes.estimated_minutes} 分钟` : ''}</span></div>
@@ -344,6 +369,7 @@ export function NailWorkbench({ user }: { user: NailUser }) {
         </section> : null}
       </div>
 
+      <ImageLightbox preview={lightbox} onClose={() => setLightbox(null)} />
       <aside className="hidden xl:block">
         <div className="sticky top-8 space-y-4">
           <div className="rounded-lg border border-[#dfe6df] bg-[#fbfcf9] p-4">

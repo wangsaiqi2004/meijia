@@ -6,6 +6,7 @@ import { reserveGeneration, refundExpired, LedgerError } from '@/lib/nail/ledger
 import { runNailGeneration } from '@/lib/nail/jobs'
 import { buildNailPrompt } from '@/lib/nail/prompt'
 import { isShopUpload, readStoredFile } from '@/lib/nail/storage'
+import { shopStyleScope } from '@/lib/nail/shop-styles'
 
 export const runtime = 'nodejs'
 
@@ -33,7 +34,7 @@ export async function POST(request: Request) {
     styleName = userStyleName
     stylePath = uploadedStylePath
   } else {
-    const style = await db.styleLibrary.findFirst({ where: { id: styleId, enabled: true } })
+    const style = await db.styleLibrary.findFirst({ where: { id: styleId, ...shopStyleScope(user.shopId) } })
     if (!style) return NextResponse.json({ error: '请选择有效的款式' }, { status: 400 })
     styleName = style.name
     stylePath = style.imagePath

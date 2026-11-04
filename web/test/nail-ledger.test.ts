@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { after, before, test } from 'node:test'
 import { PrismaClient } from '@prisma/client'
+import { addShopStyle, changeShopStyle, listShopStyles, shopStyleScope } from '../src/lib/nail/shop-styles'
 import {
   createRedeemCodes,
   finishGeneration,
@@ -136,4 +137,63 @@ test('actors cannot charge or redeem for another shop or use admin functions', a
   )
   assert.equal((await db.shop.findUniqueOrThrow({ where: { id: first.shop.id } })).credits, 30)
   assert.equal((await db.redeemCode.findUniqueOrThrow({ where: { code } })).usedAt, null)
+})
+
+test('shop owners can hide and restore builtin styles without affecting another shop', async () => {
+  const { shop: first, user: firstOwner } = await fixture()
+  const { shop: second } = await fixture()
+  const styleId = randomUUID()
+  await db.styleLibrary.create({
+    data: { id: styleId, name: '测试内置款', category: '猫眼', imagePath: 'public:styles/style-cat-eye.png' },
+  })
+  try {
+    assert.ok((await listShopStyles(db, first.id)).some(style => style.id === styleId))
+    await changeShopStyle(db, { userId: firstOwner.id, shopId: first.id, styleId })
+    await changeShopStyle(db, { userId: firstOwner.id, shopId: first.id, styleId })
+    assert.equal((await listShopStyles(db, first.id)).some(style => style.id === styleId), false)
+    assert.equal((await listShopStyles(db, first.id, true)).find(style => style.id === styleId)?.hidden, true)
+    assert.ok((await listShopStyles(db, second.id)).some(style => style.id === styleId))
+    assert.equal(await db.styleLibrary.findFirst({ where: { id: styleId, ...shopStyleScope(first.id) } }), null)
+    await changeShopStyle(db, { userId: firstOwner.id, shopId: first.id, styleId, restore: true })
+    assert.ok((await listShopStyles(db, first.id)).some(style => style.id === styleId))
+  } finally {
+    await db.styleLibrary.deleteMany({ where: { id: styleId } })
+  }
+})
+
+test('shop-specific styles remain isolated and existing images survive removal', async () => {
+  const { shop, user } = await fixture()
+  const imagePath = `uploads/library/${shop.id}/123456-${randomUUID()}.png`
+  const style = await addShopStyle(db, {
+    userId: user.id, shopId: shop.id, name: '本店奶茶猫眼', category: '猫眼', tags: '短甲', imagePath,
+  })
+  assert.ok((await listShopStyles(db, shop.id)).some(row => row.id === style.id))
+  const other = await fixture()
+  assert.equal((await listShopStyles(db, other.shop.id)).some(row => row.id === style.id), false)
+  assert.equal(await db.styleLibrary.findFirst({ where: { id: style.id, ...shopStyleScope(other.shop.id) } }), null)
+  await changeShopStyle(db, { userId: user.id, shopId: shop.id, styleId: style.id })
+  assert.equal((await listShopStyles(db, shop.id)).some(row => row.id === style.id), false)
+  assert.equal((await db.styleLibrary.findUniqueOrThrow({ where: { id: style.id } })).imagePath, imagePath)
+  assert.equal((await listShopStyles(db, shop.id, true)).find(row => row.id === style.id)?.hidden, true)
+  await changeShopStyle(db, { userId: user.id, shopId: shop.id, styleId: style.id, restore: true })
+  assert.ok((await listShopStyles(db, shop.id)).some(row => row.id === style.id))
+  await assert.rejects(addShopStyle(db, {
+    userId: user.id, shopId: shop.id, name: '跨店款', category: '日常', tags: '',
+    imagePath: `uploads/library/${other.shop.id}/123-${randomUUID()}.png`,
+  }), /无效/)
+})
+
+test('only the active shop owner can manage its saved styles', async () => {
+  const { shop, user } = await fixture()
+  const { shop: otherShop, user: otherOwner } = await fixture()
+  const styleId = randomUUID()
+  await db.styleLibrary.create({
+    data: { id: styleId, shopId: otherShop.id, name: '他店款', category: '日常', imagePath: `uploads/library/${otherShop.id}/123-${randomUUID()}.png` },
+  })
+  await assert.rejects(changeShopStyle(db, { userId: user.id, shopId: shop.id, styleId }), /不存在/)
+  const staff = await db.user.create({ data: { username: `staff-${randomUUID()}`, shopId: otherShop.id, role: 'staff', passwordHash: 'test-only' } })
+  await assert.rejects(changeShopStyle(db, { userId: staff.id, shopId: otherShop.id, styleId }), /店老板/)
+  await assert.rejects(changeShopStyle(db, { userId: user.id, shopId: otherShop.id, styleId }), /店老板/)
+  await db.shop.update({ where: { id: otherShop.id }, data: { status: 'disabled' } })
+  await assert.rejects(changeShopStyle(db, { userId: otherOwner.id, shopId: otherShop.id, styleId }), /店老板/)
 })

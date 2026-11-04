@@ -8,7 +8,7 @@ import sharp from 'sharp'
 test('4K originals keep their resolution while previews stay small and delete together', async () => {
   const folder = await mkdtemp(join(tmpdir(), 'nail-storage-'))
   process.env.NAIL_DATA_DIR = folder
-  const { saveGeneratedImage, readStoredPreview, readStoredFile, deleteStoredFile } = await import('../src/lib/nail/storage')
+    const { saveGeneratedImage, readStoredPreview, readStoredFile, deleteStoredFile } = await import('../src/lib/nail/storage')
   try {
     const input = await sharp({ create: { width: 2160, height: 3840, channels: 3, background: '#b88074' } }).png().toBuffer()
     const path = await saveGeneratedImage(input)
@@ -19,9 +19,14 @@ test('4K originals keep their resolution while previews stay small and delete to
     const preview = await sharp(previews[0]).metadata()
     assert.deepEqual([preview.width, preview.height, preview.format], [648, 1152, 'webp'])
     assert.deepEqual(previews[0], previews[1])
+    const detailBytes = await readStoredPreview(path, true)
+    const detail = await sharp(detailBytes).metadata()
+    assert.deepEqual([detail.width, detail.height, detail.format], [1350, 2400, 'webp'])
+    assert.notDeepEqual(detailBytes, previews[0])
     await deleteStoredFile(path)
     await assert.rejects(readStoredFile(path), { code: 'ENOENT' })
     await assert.rejects(readFile(join(folder, `${path}.preview.webp`)), { code: 'ENOENT' })
+    await assert.rejects(readFile(join(folder, `${path}.detail.webp`)), { code: 'ENOENT' })
   } finally {
     delete process.env.NAIL_DATA_DIR
     await rm(folder, { recursive: true, force: true })

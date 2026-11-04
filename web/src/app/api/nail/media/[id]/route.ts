@@ -21,7 +21,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   try {
     const download = new URL(request.url).searchParams.get('download') === '1'
     const preview = kind !== 'hand' && kind !== 'style' && !download
-    const bytes = new Uint8Array(await (kind === 'style' ? readStyleReference(path) : preview ? readStoredPreview(path) : readStoredFile(path)))
+    const detail = new URL(request.url).searchParams.get('view') === 'detail'
+    const bytes = new Uint8Array(await (kind === 'style' ? readStyleReference(path) : preview ? readStoredPreview(path, detail) : readStoredFile(path)))
     const headers = new Headers({
       'Content-Type': preview ? 'image/webp' : 'image/png',
       'Cache-Control': 'private, no-store',

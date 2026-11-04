@@ -38,8 +38,8 @@ export function styleImageUrl(id: string): string {
   return `/api/nail/style-preview/${encodeURIComponent(id)}`
 }
 
-export function generationImageUrl(id: string, kind: 'result' | 'hand' = 'result'): string {
-  return `/api/nail/media/${encodeURIComponent(id)}?kind=${kind}`
+export function generationImageUrl(id: string, kind: 'result' | 'hand' = 'result', view: 'preview' | 'detail' = 'preview'): string {
+  return `/api/nail/media/${encodeURIComponent(id)}?kind=${kind}${view === 'detail' ? '&view=detail' : ''}`
 }
 
 export function requestKey(): string {

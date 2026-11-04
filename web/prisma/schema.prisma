@@ -21,6 +21,8 @@ model Shop {
   generations  Generation[]
   orders       RechargeOrder[]
   usedCodes    RedeemCode[]
+  styles       StyleLibrary[]
+  hiddenStyles ShopHiddenStyle[]
 }
 
 model User {
@@ -110,6 +112,8 @@ model RedeemCode {
 
 model StyleLibrary {
   id        String   @id @default(cuid())
+  shopId    String?
+  shop      Shop?    @relation(fields: [shopId], references: [id], onDelete: Cascade)
   name      String
   category  String
   imagePath String
@@ -117,4 +121,17 @@ model StyleLibrary {
   sortOrder Int      @default(0)
   enabled   Boolean  @default(true)
   createdAt DateTime @default(now())
+  hiddenBy  ShopHiddenStyle[]
+
+  @@index([shopId, enabled])
+}
+
+model ShopHiddenStyle {
+  shopId    String
+  styleId   String
+  shop      Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  style     StyleLibrary @relation(fields: [styleId], references: [id], onDelete: Cascade)
+  createdAt DateTime     @default(now())
+
+  @@id([shopId, styleId])
 }

@@ -21,7 +21,7 @@ export async function GET() {
     }),
     db.generation.count({ where: { createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) } } }),
     db.generation.groupBy({ by: ['status'], _count: { _all: true }, _sum: { apiCostCents: true } }),
-    db.styleLibrary.findMany({ orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] }),
+    db.styleLibrary.findMany({ where: { shopId: null }, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] }),
     db.redeemCode.count({ where: { usedAt: null } }),
     db.generation.groupBy({
       by: ['shopId', 'status'],
@@ -93,6 +93,7 @@ export async function POST(request: Request) {
     }
     if (action === 'save-style') {
       const id = String(body?.id || '')
+      if (id && await db.styleLibrary.findFirst({ where: { id, shopId: { not: null } } })) throw new LedgerError('店铺专属款式由店老板管理')
       const name = String(body?.name || '').trim()
       const category = String(body?.category || '').trim()
       const imagePath = String(body?.imagePath || '').trim()
@@ -118,7 +119,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ style })
     }
     if (action === 'delete-style') {
-      await db.styleLibrary.delete({ where: { id: String(body?.id || '') } })
+      await db.styleLibrary.deleteMany({ where: { id: String(body?.id || ''), shopId: null } })
       return NextResponse.json({ ok: true })
     }
     return NextResponse.json({ error: '未知操作' }, { status: 400 })
