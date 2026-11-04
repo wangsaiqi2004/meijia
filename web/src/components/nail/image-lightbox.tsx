@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { Maximize2, X } from 'lucide-react'
+import { motion } from 'motion/react'
 
-type Preview = { src: string; title: string } | null
+type Preview = { src: string; title: string; layoutId?: string } | null
 
 export function ImageLightbox({ preview, onClose }: { preview: Preview; onClose: () => void }) {
   const [zoomed, setZoomed] = useState(false)
@@ -15,10 +16,10 @@ export function ImageLightbox({ preview, onClose }: { preview: Preview; onClose:
 
   return <Dialog.Root open={Boolean(preview)} onOpenChange={open => { if (!open) onClose() }}>
     <Dialog.Portal>
-      <Dialog.Overlay className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out" />
+      <Dialog.Overlay className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 duration-200" />
       <Dialog.Content
         aria-describedby={undefined}
-        className="fixed inset-0 z-[101] flex h-dvh w-screen flex-col bg-[#101311] text-white outline-none"
+        className="fixed inset-0 z-[101] flex h-dvh w-screen flex-col bg-[#101311] text-white outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 duration-200"
         onEscapeKeyDown={onClose}
       >
         <Dialog.Title className="sr-only">{preview ? `放大查看：${preview.title}` : '图片预览'}</Dialog.Title>
@@ -50,10 +51,13 @@ export function ImageLightbox({ preview, onClose }: { preview: Preview; onClose:
           onClick={event => { if (event.target === event.currentTarget) onClose() }}
         >
           {preview ? <div className={zoomed ? 'flex min-h-full w-max min-w-full items-center justify-center' : 'flex h-full w-full items-center justify-center'}>
-            <img
+            <motion.img
+              layout
+              layoutId={preview.layoutId}
               src={preview.src}
               alt={preview.title}
               onClick={() => setZoomed(value => !value)}
+              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
               className={zoomed
                 ? 'h-auto w-[125vw] max-w-none shrink-0 cursor-zoom-out object-contain sm:w-[min(125vw,1600px)]'
                 : 'max-h-[calc(100dvh-5rem)] max-w-full cursor-zoom-in object-contain'}

@@ -58,7 +58,7 @@ export async function editNailImage(input: {
   form.append('prompt', input.prompt)
   form.append('n', '1')
   form.append('size', input.size === '4k' ? '2160x3840' : '1024x1536')
-  form.append('quality', input.mode === 'promo' ? 'high' : 'medium')
+  form.append('quality', 'max')
   form.append('output_format', 'png')
   form.append('response_format', 'b64_json')
   form.append('image', new Blob([new Uint8Array(await readStoredFile(input.handPath))], { type: 'image/png' }), 'hand.png')

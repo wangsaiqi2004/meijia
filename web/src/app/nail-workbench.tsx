@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Camera, Check, CircleAlert, Download, ImagePlus, LoaderCircle, Maximize2, RefreshCw, Sparkles, Upload, X } from 'lucide-react'
+import { AnimatePresence, LayoutGroup, MotionConfig, motion } from 'motion/react'
 import { toast } from 'sonner'
 import { formatPoints, generationImageUrl, nailFetch, requestKey, styleImageUrl, uploadImageUrl, type NailUser } from '@/lib/nail/client'
 import { generationPrice } from '@/lib/nail/pricing'
@@ -51,18 +52,18 @@ function FileTile({ title, description, accept, capture, preview, busy, onChange
       event.currentTarget.value = ''
     }} />
     <button type="button" disabled={busy} onClick={() => input.current?.click()} className={`group relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden rounded-md border text-left transition ${preview ? 'border-[#d8e0d8] bg-[#e8ece7]' : 'border-dashed border-[#cbd7cd] bg-[#f7f9f6] hover:border-[#8fa895] hover:bg-white'}`}>
-      {preview ? <img src={preview} alt={title} className="size-full object-contain" /> : <span className="flex flex-col items-center px-3 text-center"><span className="mb-2 grid size-10 place-items-center rounded-md bg-[#e7eee7] text-[#426a55]">{capture ? <Camera className="size-[18px]" /> : <Upload className="size-[18px]" />}</span><span className="text-[12px] font-medium text-[#43584a]">{capture ? '拍照或从相册选择' : '选择款式参考图'}</span><span className="mt-1 text-[10px] text-[#97a39a]">{busy ? '正在上传…' : 'PNG / JPG，最大 4MB'}</span></span>}
+      {preview ? <motion.img src={preview} alt={title} initial={{ opacity: 0, scale: 0.99 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }} className="size-full object-contain" /> : <span className="flex flex-col items-center px-3 text-center"><span className="mb-2 grid size-10 place-items-center rounded-md bg-[#e7eee7] text-[#426a55]">{capture ? <Camera className="size-[18px]" /> : <Upload className="size-[18px]" />}</span><span className="text-[12px] font-medium text-[#43584a]">{capture ? '拍照或从相册选择' : '选择款式参考图'}</span><span className="mt-1 text-[10px] text-[#97a39a]">{busy ? '正在上传…' : 'PNG / JPG，最大 4MB'}</span></span>}
       {busy ? <span className="absolute inset-0 grid place-items-center bg-[#f5f8f4]/80"><LoaderCircle className="size-5 animate-spin text-[#426a55]" /></span> : null}
     </button>
     {capture ? <label className="mt-2 flex min-h-9 cursor-pointer items-center justify-center gap-1 text-xs text-[#52675a]"><Camera className="size-3.5" />拍摄手部照片<input type="file" accept="image/*" capture="environment" className="sr-only" disabled={busy} onChange={event => { const file = event.target.files?.[0]; if (file) onChange(file); event.currentTarget.value = '' }} /></label> : null}
   </div>
 }
 
-function EnlargedImage({ src, alt, onZoom, className }: {
-  src: string; alt: string; onZoom: () => void; className: string
+function EnlargedImage({ src, alt, onZoom, className, layoutId }: {
+  src: string; alt: string; onZoom: () => void; className: string; layoutId: string
 }) {
   return <button type="button" onClick={onZoom} aria-label={`放大查看${alt}`} title="点击放大查看" className="group relative block w-full overflow-hidden">
-    <img src={src} alt={alt} className={className} />
+    <motion.img layoutId={layoutId} src={src} alt={alt} className={className} />
     <span className="absolute right-2 bottom-2 grid size-7 place-items-center rounded-md bg-black/55 text-white opacity-80 transition group-hover:opacity-100"><Maximize2 className="size-3.5" /></span>
   </button>
 }
@@ -87,7 +88,7 @@ export function NailWorkbench({ user }: { user: NailUser }) {
   const [generating, setGenerating] = useState(false)
   const [generationId, setGenerationId] = useState('')
   const [generation, setGeneration] = useState<Generation | null>(null)
-  const [lightbox, setLightbox] = useState<{ src: string; title: string } | null>(null)
+  const [lightbox, setLightbox] = useState<{ src: string; title: string; layoutId: string } | null>(null)
   const [elapsed, setElapsed] = useState(0)
   const handledTask = useRef('')
   const submitLock = useRef(false)
@@ -278,7 +279,9 @@ export function NailWorkbench({ user }: { user: NailUser }) {
     window.history.replaceState(null, '', '/')
   }
 
-  return <div className="nail-workbench mx-auto max-w-[1050px]">
+  return <MotionConfig reducedMotion="user" transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}>
+    <LayoutGroup id="nail-workbench">
+    <div className="nail-workbench mx-auto max-w-[1050px]">
     <PageTitle eyebrow="SALON DESIGN WORKSPACE" title="美甲效果预览" detail="按顾客真实手部和原甲条件，生成可沟通、可施工的款式参考。" />
 
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_280px]">
@@ -313,10 +316,10 @@ export function NailWorkbench({ user }: { user: NailUser }) {
               const selected = styleId === item.id
               return <article key={item.id} className={`relative overflow-hidden rounded-md border transition ${selected ? 'border-[#47745b] ring-2 ring-[#47745b]/15' : 'border-[#e2e8e1] hover:border-[#a6b9a8]'}`}>
                 <button type="button" aria-pressed={selected} onClick={() => chooseStyle(item)} className="group block w-full text-left">
-                  <span className="relative block aspect-[4/3] overflow-hidden bg-[#edf0eb]"><img src={styleImageUrl(item.id)} alt="" className="size-full object-cover transition duration-300 group-hover:scale-[1.03]" />{selected ? <span className="absolute right-2 top-2 grid size-6 place-items-center rounded-full bg-[#173b32] text-white"><Check className="size-3.5" /></span> : null}</span>
+                  <span className="relative block aspect-[4/3] overflow-hidden bg-[#edf0eb]"><motion.img layoutId={`style-${item.id}`} src={styleImageUrl(item.id)} alt="" className="size-full object-cover transition duration-200 group-hover:scale-[1.02]" />{selected ? <motion.span layoutId="selected-style-indicator" className="absolute right-2 top-2 grid size-6 place-items-center rounded-full bg-[#173b32] text-white"><Check className="size-3.5" /></motion.span> : null}</span>
                   <span className="block p-2.5 pr-9"><span className="block truncate text-[12px] font-semibold text-[#34483b]">{item.name}</span><span className="mt-1 block truncate text-[10px] text-[#8b998f]">{item.tags.split(',').slice(0, 2).join(' · ')}</span></span>
                 </button>
-                <button type="button" title="放大款式图片" aria-label={`放大查看${item.name}`} onClick={() => setLightbox({ src: styleImageUrl(item.id), title: item.name })} className="absolute right-1 bottom-2 grid size-8 place-items-center rounded-sm text-[#6f8275] hover:bg-[#e8eee7]"><Maximize2 className="size-3.5" /></button>
+                <button type="button" title="放大款式图片" aria-label={`放大查看${item.name}`} onClick={() => setLightbox({ src: styleImageUrl(item.id), title: item.name, layoutId: `style-${item.id}` })} className="absolute right-1 bottom-2 grid size-8 place-items-center rounded-sm text-[#6f8275] transition-colors duration-150 hover:bg-[#e8eee7]"><Maximize2 className="size-3.5" /></button>
               </article>
             })}
           </div> : <div className="rounded-md border border-dashed border-[#d7e0d7] py-8 text-center text-xs text-[#8b998f]">这个分类暂时没有款式</div>}
@@ -333,12 +336,10 @@ export function NailWorkbench({ user }: { user: NailUser }) {
           <div className="mb-4 flex items-center gap-2"><span className="grid size-6 place-items-center rounded-full bg-[#e8f0e9] text-[11px] font-bold text-[#426a55]">4</span><h2 className="text-[14px] font-semibold">预览设置</h2></div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div><p className="mb-2 text-[11px] font-medium text-[#718077]">使用场景</p><div className="grid grid-cols-2 rounded-md bg-[#eef2ed] p-1">
-              <button type="button" onClick={() => setMode('preview')} className={`h-9 rounded-sm text-[11px] font-semibold transition ${mode === 'preview' ? 'bg-white text-[#244938] shadow-sm' : 'text-[#78877e]'}`}>真实沟通版</button>
-              <button type="button" onClick={() => setMode('promo')} className={`h-9 rounded-sm text-[11px] font-semibold transition ${mode === 'promo' ? 'bg-white text-[#244938] shadow-sm' : 'text-[#78877e]'}`}>宣传展示版</button>
+              {(['preview', 'promo'] as const).map((value, index) => <button key={value} type="button" aria-pressed={mode === value} onClick={() => setMode(value)} className={`relative h-9 rounded-sm text-[11px] font-semibold transition-colors duration-150 ${mode === value ? 'text-[#244938]' : 'text-[#78877e]'}`}>{mode === value ? <motion.span layoutId="mode-indicator" className="absolute inset-0 rounded-sm bg-white shadow-sm" /> : null}<span className="relative">{index === 0 ? '真实沟通版' : '宣传展示版'}</span></button>)}
             </div></div>
             <div><p className="mb-2 text-[11px] font-medium text-[#718077]">图片尺寸</p><div className="grid grid-cols-2 rounded-md bg-[#eef2ed] p-1">
-              <button type="button" onClick={() => setSize('1k')} className={`h-9 rounded-sm text-[11px] font-semibold transition ${size === '1k' ? 'bg-white text-[#244938] shadow-sm' : 'text-[#78877e]'}`}>标准 1K · {generationPrice('1k', isVip)} 点</button>
-              <button type="button" onClick={() => setSize('4k')} className={`h-9 rounded-sm text-[11px] font-semibold transition ${size === '4k' ? 'bg-white text-[#244938] shadow-sm' : 'text-[#78877e]'}`}>高清 4K · {generationPrice('4k', isVip)} 点</button>
+              {(['1k', '4k'] as const).map((value, index) => <button key={value} type="button" aria-pressed={size === value} onClick={() => setSize(value)} className={`relative h-9 rounded-sm text-[11px] font-semibold transition-colors duration-150 ${size === value ? 'text-[#244938]' : 'text-[#78877e]'}`}>{size === value ? <motion.span layoutId="size-indicator" className="absolute inset-0 rounded-sm bg-white shadow-sm" /> : null}<span className="relative">{index === 0 ? `标准 1K · ${generationPrice('1k', isVip)} 点` : `高清 4K · ${generationPrice('4k', isVip)} 点`}</span></button>)}
             </div></div>
           </div>
           {balance !== null ? <p className="mt-3 text-[11px] text-[#85938a]">店铺可用 {formatPoints(balance)} 点{user.role === 'staff' ? ' · 与店主共用点数' : ''}</p> : null}
@@ -354,10 +355,14 @@ export function NailWorkbench({ user }: { user: NailUser }) {
             <div><p className="text-[10px] font-semibold tracking-[0.12em] text-[#8a9c91]">RESULT</p><h2 className="mt-1 text-[15px] font-semibold">效果预览</h2></div>
             {generation.status === 'success' ? <div className="flex gap-2"><a href={`${generationImageUrl(generation.id)}&download=1`} className="flex h-9 items-center gap-1.5 rounded-md border border-[#d8e0d8] bg-white px-3 text-[11px] font-semibold text-[#53685a] hover:border-[#8fa895]"><Download className="size-3.5" />下载</a><button type="button" onClick={reset} className="flex h-9 items-center gap-1.5 rounded-md bg-[#173b32] px-3 text-[11px] font-semibold text-white hover:bg-[#245344]"><RefreshCw className="size-3.5" />换个款式</button></div> : null}
           </div>
-          {generation.status === 'pending' ? <div className="grid min-h-48 place-items-center rounded-md bg-[#f1f4ef]"><div className="text-center"><LoaderCircle className="mx-auto size-6 animate-spin text-[#47745b]" /><p className="mt-3 text-sm font-medium text-[#475a4c]">正在生成这只手的款式效果</p><p className="mt-1 text-xs text-[#8b998f]">通常约 30 秒，请稍候</p></div></div> : generation.status === 'success' ? <div className="grid gap-3 sm:grid-cols-2">
-            <figure className="overflow-hidden rounded-md border border-[#e3e9e2] bg-[#f1f4ef]"><figcaption className="px-3 py-2 text-[11px] font-medium text-[#748279]">顾客原手</figcaption><EnlargedImage src={generationImageUrl(generation.id, 'hand')} alt="顾客原手部照片" onZoom={() => setLightbox({ src: generationImageUrl(generation.id, 'hand'), title: '顾客原手部照片' })} className="aspect-[4/3] w-full object-contain" /></figure>
-            <figure className="overflow-hidden rounded-md border border-[#e3e9e2] bg-[#f1f4ef]"><figcaption className="px-3 py-2 text-[11px] font-medium text-[#748279]">款式效果 · {generation.styleName}</figcaption><EnlargedImage src={generationImageUrl(generation.id)} alt={`${generation.styleName}美甲效果预览`} onZoom={() => setLightbox({ src: generationImageUrl(generation.id, 'result', 'detail'), title: `${generation.styleName}美甲效果预览` })} className="aspect-[4/3] w-full object-contain" /></figure>
-          </div> : <div className="rounded-md border border-[#f0d8cb] bg-[#fff7f2] p-4 text-sm text-[#98674f]">{generation.failReason || '生成失败，点数已退回'}</div>}
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div key={generation.status} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}>
+              {generation.status === 'pending' ? <div className="grid min-h-48 place-items-center rounded-md bg-[#f1f4ef]"><div className="text-center"><LoaderCircle className="mx-auto size-6 animate-spin text-[#47745b]" /><p className="mt-3 text-sm font-medium text-[#475a4c]">正在生成这只手的款式效果</p><p className="mt-1 text-xs text-[#8b998f]">通常约 30 秒，请稍候</p></div></div> : generation.status === 'success' ? <div className="grid gap-3 sm:grid-cols-2">
+              <figure className="overflow-hidden rounded-md border border-[#e3e9e2] bg-[#f1f4ef]"><figcaption className="px-3 py-2 text-[11px] font-medium text-[#748279]">顾客原手</figcaption><EnlargedImage layoutId={`generation-${generation.id}-hand`} src={generationImageUrl(generation.id, 'hand')} alt="顾客原手部照片" onZoom={() => setLightbox({ src: generationImageUrl(generation.id, 'hand'), title: '顾客原手部照片', layoutId: `generation-${generation.id}-hand` })} className="aspect-[4/3] w-full object-contain" /></figure>
+              <figure className="overflow-hidden rounded-md border border-[#e3e9e2] bg-[#f1f4ef]"><figcaption className="px-3 py-2 text-[11px] font-medium text-[#748279]">款式效果 · {generation.styleName}</figcaption><EnlargedImage layoutId={`generation-${generation.id}-result`} src={generationImageUrl(generation.id)} alt={`${generation.styleName}美甲效果预览`} onZoom={() => setLightbox({ src: generationImageUrl(generation.id, 'result', 'detail'), title: `${generation.styleName}美甲效果预览`, layoutId: `generation-${generation.id}-result` })} className="aspect-[4/3] w-full object-contain" /></figure>
+            </div> : <div className="rounded-md border border-[#f0d8cb] bg-[#fff7f2] p-4 text-sm text-[#98674f]">{generation.failReason || '生成失败，点数已退回'}</div>}
+            </motion.div>
+          </AnimatePresence>
           {generation.status === 'success' && generation.notes ? <div className="mt-4 border-t border-[#e4e9e3] pt-4">
             <div className="flex items-center justify-between"><h3 className="text-[13px] font-semibold text-[#30483a]">施工参考</h3><span className="text-[10px] text-[#87958c]">{generation.notes.difficulty || '难度未标'} · {generation.notes.estimated_minutes ? `${generation.notes.estimated_minutes} 分钟` : ''}</span></div>
             {generation.notes.materials?.length ? <p className="mt-2 text-[11px] leading-5 text-[#64756a]">材料：{generation.notes.materials.join('、')}</p> : null}
@@ -388,5 +393,7 @@ export function NailWorkbench({ user }: { user: NailUser }) {
         </div>
       </aside>
     </div>
-  </div>
+    </div>
+    </LayoutGroup>
+  </MotionConfig>
 }
