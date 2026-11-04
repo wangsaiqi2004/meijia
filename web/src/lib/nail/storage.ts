@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, normalize, relative } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import sharp from 'sharp'
@@ -52,7 +52,42 @@ export async function saveGeneratedImage(buffer: Buffer): Promise<string> {
   const absolutePath = join(DATA_DIR, relativePath)
   await mkdir(dirname(absolutePath), { recursive: true })
   await writeFile(absolutePath, png)
-  return relativePath.replaceAll('\\', '/')
+  const storedPath = relativePath.replaceAll('\\', '/')
+  try {
+    await readStoredPreview(storedPath)
+    return storedPath
+  } catch (error) {
+    await deleteStoredFile(storedPath)
+    throw error
+  }
+}
+
+const previewJobs = new Map<string, Promise<Buffer>>()
+
+export async function readStoredPreview(path: string): Promise<Buffer> {
+  const absolutePath = join(DATA_DIR, safeRelative(path))
+  const previewPath = `${absolutePath}.preview.webp`
+  try { return await readFile(previewPath) } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  const existing = previewJobs.get(absolutePath)
+  if (existing) return existing
+  const job = (async () => {
+    const image = await sharp(absolutePath, { limitInputPixels: 40_000_000 })
+      .resize(768, 1152, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 84 })
+      .toBuffer()
+    const temporaryPath = `${previewPath}.${randomUUID()}.tmp`
+    try {
+      await writeFile(temporaryPath, image)
+      await rename(temporaryPath, previewPath)
+      return image
+    } finally {
+      await rm(temporaryPath, { force: true })
+    }
+  })()
+  previewJobs.set(absolutePath, job)
+  try { return await job } finally { previewJobs.delete(absolutePath) }
 }
 
 export async function readStoredFile(path: string): Promise<Buffer> {
@@ -61,7 +96,10 @@ export async function readStoredFile(path: string): Promise<Buffer> {
 
 export async function deleteStoredFile(path?: string | null): Promise<void> {
   if (!path) return
-  try { await rm(join(DATA_DIR, safeRelative(path)), { force: true }) } catch {}
+  const absolutePath = join(DATA_DIR, safeRelative(path))
+  await Promise.all([absolutePath, `${absolutePath}.preview.webp`].map(async target => {
+    try { await rm(target, { force: true }) } catch {}
+  }))
 }
 
 export function resolveStoredPath(path: string): string {

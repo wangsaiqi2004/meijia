@@ -8,7 +8,7 @@
     "build": "next build --webpack",
     "start": "next start",
     "db:seed": "tsx prisma/seed.ts",
-    "test:nail": "tsx --test test/nail-ledger.test.ts"
+    "test:nail": "tsx --test test/nail-ledger.test.ts test/nail-storage.test.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.0",

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/nail/auth'
 import { db } from '@/lib/nail/db'
-import { readStoredFile } from '@/lib/nail/storage'
+import { readStoredFile, readStoredPreview } from '@/lib/nail/storage'
 import { readStyleReference } from '@/lib/nail/image-provider'
 
 export const runtime = 'nodejs'
@@ -19,13 +19,15 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const path = kind === 'hand' ? generation.inputHandPath : kind === 'style' ? generation.inputStylePath : generation.outputPath
   if (!path) return new NextResponse('Not found', { status: 404 })
   try {
-    const bytes = new Uint8Array(await (kind === 'style' ? readStyleReference(path) : readStoredFile(path)))
+    const download = new URL(request.url).searchParams.get('download') === '1'
+    const preview = kind !== 'hand' && kind !== 'style' && !download
+    const bytes = new Uint8Array(await (kind === 'style' ? readStyleReference(path) : preview ? readStoredPreview(path) : readStoredFile(path)))
     const headers = new Headers({
-      'Content-Type': 'image/png',
+      'Content-Type': preview ? 'image/webp' : 'image/png',
       'Cache-Control': 'private, no-store',
       'X-Content-Type-Options': 'nosniff',
     })
-    if (new URL(request.url).searchParams.get('download') === '1') {
+    if (download) {
       headers.set('Content-Disposition', `attachment; filename="nail-preview-${id}.png"`)
     }
     return new NextResponse(bytes, { headers })
