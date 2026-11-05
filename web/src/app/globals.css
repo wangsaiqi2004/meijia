@@ -4,8 +4,42 @@
 body { letter-spacing: 0; }
 button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
 :focus-visible { outline: 2px solid #668b76; outline-offset: 3px; }
-.nail-workbench section { border-radius: 0; border-width: 0 0 1px; background: transparent; }
-.nail-workbench [class*="tracking-"] { letter-spacing: 0; }
+.nail-app, .nail-login {
+  --app-page: #fafafa;
+  --app-raised: #f4f4f5;
+  --app-border: rgb(23 23 23 / 8%);
+  --app-ink: #171717;
+  --app-secondary: #525252;
+  --app-muted: #737373;
+  --app-accent: #245344;
+  background-color: var(--app-page);
+  color: var(--app-ink);
+  font-variant-numeric: tabular-nums;
+}
+.nail-app .lucide, .nail-login .lucide {
+  stroke-width: 1.5;
+}
+.nail-workbench section {
+  border-radius: 0;
+  border-width: 0 0 1px;
+  background: transparent;
+}
+.nail-app button, .nail-app a, .nail-app input, .nail-app textarea, .nail-app select {
+  letter-spacing: 0;
+}
+.nail-app button, .nail-app a, .nail-app textarea,
+.nail-login button, .nail-login input {
+  transition-property: color, background-color, border-color, opacity, transform;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+.nail-app input, .nail-app textarea {
+  color: var(--app-ink);
+}
+.nail-app input::placeholder, .nail-app textarea::placeholder {
+  color: var(--app-muted);
+  opacity: 1;
+}
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
@@ -127,13 +161,13 @@ button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
   }
   html,
   body {
-    background: radial-gradient(circle at top left, rgba(255, 255, 255, 0.92), rgba(245, 239, 231, 0.96) 42%, rgba(240, 235, 227, 0.99) 100%);
+    background-color: #f7f7f4;
     overscroll-behavior: none;
   }
 
   .dark,
   .dark body {
-    background: radial-gradient(circle at top left, rgba(55, 48, 43, 0.72), rgba(28, 25, 23, 0.98) 40%, rgba(12, 10, 9, 1) 100%);
+    background-color: #1c1917;
   }
 
   body {

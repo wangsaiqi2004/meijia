@@ -81,6 +81,7 @@ npm run build
 - 界面基础：`jimbb/chatgpt-image-portal`，起点 `11062e8`，保留原 Git 历史及根目录 LICENSE。
 - 网关：`QuantumNous/new-api`，子模块 `vendor/new-api` 固定 `e835b1b`（v1.0.0-rc.47）。补丁 `deploy/new-api-codexing.patch`；网关遵循其 AGPL-3.0 及 NOTICE。部署者应向网络用户提供对应源码。
 - 内置款式图为本项目调用已授权图片服务生成的参考素材，出处记在 `web/public/styles/SOURCES.md`。
+- 本次界面整理采用 Damir Sokolovsky 的 [unslop](https://heydamir.design/unslop) 方法（CC BY 4.0）；设计方向、改动与封面生成记录见 [设计记录](docs/design-unslop.md)。
 - API 密钥、服务器凭据、数据库、客户照片、测试截图都不进入仓库。
 
 ---
