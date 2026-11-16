@@ -7,18 +7,20 @@ import {
   createShopAccount,
   LedgerError,
   manualCredit,
+  clearProviderApiKey,
   resetPrices,
+  setProviderSettings,
   setPrices,
   setShopStatus,
   setShopVip,
 } from '@/lib/nail/ledger'
-import { getPricingConfig } from '@/lib/nail/system-config'
+import { getPricingConfig, getPublicProviderSettings } from '@/lib/nail/system-config'
 import { validatePriceTable } from '@/lib/nail/contracts'
 
 export async function GET() {
   const user = await getCurrentUser()
   if (user?.role !== 'admin') return NextResponse.json({ error: '没有管理权限' }, { status: 403 })
-  const [shops, today, totals, styles, codes, shopUsage, config] = await Promise.all([
+  const [shops, today, totals, styles, codes, shopUsage, config, provider] = await Promise.all([
     db.shop.findMany({
       orderBy: { createdAt: 'desc' },
       include: { _count: { select: { users: true, generations: true } } },
@@ -33,6 +35,7 @@ export async function GET() {
       _sum: { creditsCost: true, apiCostCents: true },
     }),
     getPricingConfig(),
+    getPublicProviderSettings(),
   ])
   return NextResponse.json({
     shops: shops.map(shop => {
@@ -44,7 +47,7 @@ export async function GET() {
         apiCostCents: usage.reduce((sum, row) => sum + (row._sum.apiCostCents || 0), 0),
       }
     }),
-    today, totals, styles, unusedCodes: codes, config,
+    today, totals, styles, unusedCodes: codes, config: { ...config, provider },
   })
 }
 
@@ -135,6 +138,21 @@ export async function POST(request: Request) {
     }
     if (action === 'reset-prices') {
       await resetPrices(db, { adminId: user.id, operatorName: user.username })
+      return NextResponse.json({ ok: true })
+    }
+    if (action === 'save-provider-settings') {
+      await setProviderSettings(db, {
+        adminId: user.id,
+        operatorName: user.username,
+        apiBaseUrl: body?.apiBaseUrl,
+        imageModel: body?.imageModel,
+        textModel: body?.textModel,
+        apiKey: body?.apiKey,
+      })
+      return NextResponse.json({ ok: true })
+    }
+    if (action === 'clear-provider-key') {
+      await clearProviderApiKey(db, { adminId: user.id, operatorName: user.username })
       return NextResponse.json({ ok: true })
     }
     return NextResponse.json({ error: '未知操作' }, { status: 400 })

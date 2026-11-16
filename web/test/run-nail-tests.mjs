@@ -10,7 +10,11 @@ const dbPath = join(testDir, 'ledger.db')
 writeFileSync(dbPath, '')
 const dbUrl = `file:${dbPath.replaceAll('\\', '/')}`
 process.env.DATABASE_URL = dbUrl
-const env = { ...process.env, DATABASE_URL: dbUrl }
+const env = {
+  ...process.env,
+  DATABASE_URL: dbUrl,
+  NAIL_CONFIG_ENCRYPTION_KEY: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+}
 
 const TEST_FILES = [
   'test/nail-ledger.test.ts',

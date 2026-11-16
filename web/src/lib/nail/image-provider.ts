@@ -1,13 +1,9 @@
 import { readFile } from 'node:fs/promises'
 import { join, normalize } from 'node:path'
 import { saveGeneratedImage, readStoredFile } from './storage'
+import { getProviderConfig } from './system-config'
 import { nailSwatchSvg } from './styles'
 import sharp from 'sharp'
-
-const configuredBase = (process.env.IMAGE_API_BASE_URL || 'https://api.codexing.cn/v1').replace(/\/+$/, '')
-const IMAGE_BASE_URL = configuredBase.endsWith('/v1') ? configuredBase : `${configuredBase}/v1`
-const IMAGE_MODEL = process.env.IMAGE_MODEL || 'gpt-image-2.5-sunburst'
-const TEXT_MODEL = process.env.TEXT_MODEL || 'gpt-4o-mini'
 
 function fakeImage(styleName: string): Buffer {
   const safe = styleName.replace(/[<>&"]/g, '').slice(0, 24)
@@ -25,13 +21,20 @@ export async function readStyleReference(path: string): Promise<Buffer> {
   return readStoredFile(path)
 }
 
-async function readImageResult(data: Record<string, unknown>): Promise<Buffer> {
+async function readImageResult(data: Record<string, unknown>, apiBaseUrl: string, apiKey: string): Promise<Buffer> {
   if (typeof data.b64_json === 'string') return Buffer.from(data.b64_json, 'base64')
   if (typeof data.url === 'string') {
-    const response = await fetch(data.url, {
-      headers: new URL(data.url).origin === new URL(IMAGE_BASE_URL).origin ? { Authorization: `Bearer ${process.env.IMAGE_API_KEY || ''}` } : undefined,
-      signal: AbortSignal.timeout(15_000),
-    })
+    let resultUrl: URL
+    let response: Response
+    try {
+      resultUrl = new URL(data.url)
+      response = await fetch(resultUrl, {
+        headers: resultUrl.origin === new URL(apiBaseUrl).origin ? { Authorization: `Bearer ${apiKey}` } : undefined,
+        signal: AbortSignal.timeout(15_000),
+      })
+    } catch {
+      throw new Error('图片下载失败，请检查生图服务返回的图片地址')
+    }
     if (!response.ok) throw new Error(`图片下载失败：${response.status}`)
     return Buffer.from(await response.arrayBuffer())
   }
@@ -46,15 +49,20 @@ export async function editNailImage(input: {
   styleName: string
   mode?: 'preview' | 'promo'
 }): Promise<{ outputPath: string; apiCostCents: number }> {
-  if (!process.env.IMAGE_API_KEY) {
+  const provider = await getProviderConfig()
+  if (!provider.configValid && (process.env.NODE_ENV === 'production' || provider.apiKey)) {
+    throw new Error('生图服务配置无效，请联系管理员检查设置')
+  }
+  if (!provider.apiKey) {
     if (process.env.NODE_ENV === 'production' || process.env.NAIL_MOCK_IMAGES !== 'true') {
       throw new Error('生图服务尚未配置，请联系管理员；点数已自动退回')
     }
     const path = await saveGeneratedImage(fakeImage(input.styleName))
     return { outputPath: path, apiCostCents: 0 }
   }
+  const apiBaseUrl = provider.apiBaseUrl
   const form = new FormData()
-  form.append('model', IMAGE_MODEL)
+  form.append('model', provider.imageModel)
   form.append('prompt', input.prompt)
   form.append('n', '1')
   form.append('size', input.size === '4k' ? '2160x3840' : '1024x1536')
@@ -63,33 +71,44 @@ export async function editNailImage(input: {
   form.append('response_format', 'b64_json')
   form.append('image', new Blob([new Uint8Array(await readStoredFile(input.handPath))], { type: 'image/png' }), 'hand.png')
   form.append('image', new Blob([new Uint8Array(await readStyleReference(input.stylePath))], { type: 'image/png' }), 'style.png')
-  const response = await fetch(`${IMAGE_BASE_URL}/images/edits`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${process.env.IMAGE_API_KEY}` },
-    body: form,
-    signal: AbortSignal.timeout(100_000),
-  })
+  let response: Response
+  try {
+    response = await fetch(`${apiBaseUrl}/images/edits`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${provider.apiKey}` },
+      body: form,
+      signal: AbortSignal.timeout(100_000),
+    })
+  } catch {
+    throw new Error('生图服务连接失败，请检查后台接口地址、模型名称和 API Key')
+  }
   const body = await response.json().catch(() => ({})) as { data?: Record<string, unknown>[]; error?: { message?: string } }
   if (!response.ok) throw new Error(`生图接口暂时不可用（${response.status}），点数会自动退回`)
   const item = body.data?.[0]
   if (!item) throw new Error('接口没有返回图片')
-  const outputPath = await saveGeneratedImage(await readImageResult(item))
+  const outputPath = await saveGeneratedImage(await readImageResult(item, apiBaseUrl, provider.apiKey))
   return { outputPath, apiCostCents: input.size === '4k' ? 10 : 1 }
 }
 
 export async function createCraftNotes(styleName: string, extraPrompt: string): Promise<Record<string, unknown> | null> {
-  if (!process.env.IMAGE_API_KEY || !process.env.TEXT_MODEL) return null
-  const response = await fetch(`${IMAGE_BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${process.env.IMAGE_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: TEXT_MODEL,
-      temperature: 0.2,
-      response_format: { type: 'json_object' },
-      messages: [{ role: 'user', content: `为美甲师输出 JSON 施工说明。款式：${styleName}。补充：${extraPrompt}。只允许常见甲油胶、猫眼胶、贴饰和手绘工艺，保留顾客原甲型与长度。字段：materials, steps, estimated_minutes, difficulty, warnings。` }],
-    }),
-    signal: AbortSignal.timeout(20_000),
-  })
+  const provider = await getProviderConfig()
+  if (!provider.configValid || !provider.apiKey || !provider.textModel) return null
+  let response: Response
+  try {
+    response = await fetch(`${provider.apiBaseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${provider.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: provider.textModel,
+        temperature: 0.2,
+        response_format: { type: 'json_object' },
+        messages: [{ role: 'user', content: `为美甲师输出 JSON 施工说明。款式：${styleName}。补充：${extraPrompt}。只允许常见甲油胶、猫眼胶、贴饰和手绘工艺，保留顾客原甲型与长度。字段：materials, steps, estimated_minutes, difficulty, warnings。` }],
+      }),
+      signal: AbortSignal.timeout(20_000),
+    })
+  } catch {
+    return null
+  }
   if (!response.ok) return null
   const body = await response.json().catch(() => ({})) as { choices?: { message?: { content?: string } }[] }
   const content = body.choices?.[0]?.message?.content

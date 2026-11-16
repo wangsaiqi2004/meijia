@@ -7,11 +7,12 @@ import {
   validatePriceTable,
   type PriceTable,
   type PricingConfig,
+  type ProviderSettings,
   type Size,
 } from '@/lib/nail/contracts'
 
 export type SystemSettingsProps = {
-  config: PricingConfig
+  config: PricingConfig & { provider: ProviderSettings }
   busy: boolean
   onAction: (body: Record<string, unknown>, success: string) => Promise<void>
 }
@@ -33,13 +34,28 @@ const cardClass = 'rounded-lg border border-[var(--app-border)] bg-white p-4 sm:
 const inputClass = 'h-10 w-full rounded-md border border-[var(--app-border)] bg-white px-3 text-xs text-[var(--app-ink)]'
 const primaryButton = 'flex h-10 items-center justify-center rounded-md bg-[#173b32] px-4 text-xs font-medium text-white disabled:opacity-50'
 const secondaryButton = 'flex h-10 items-center justify-center rounded-md border border-[var(--app-border)] bg-white px-4 text-xs font-medium text-[var(--app-secondary)] disabled:opacity-50'
+const DEFAULT_IMAGE_BASE = 'https://api.codexing.cn/v1'
+const DEFAULT_IMAGE_MODEL = 'gpt-image-2.5-sunburst'
 
 /** 管理后台「系统设置」：生图价格。 */
 export function SystemSettings({ config, busy, onAction }: SystemSettingsProps) {
   const [priceForm, setPriceForm] = useState<PriceForm>(() => toForm(config.prices))
+  const [providerForm, setProviderForm] = useState(() => ({
+    apiBaseUrl: config.provider.apiBaseUrl || DEFAULT_IMAGE_BASE,
+    imageModel: config.provider.imageModel || DEFAULT_IMAGE_MODEL,
+    textModel: config.provider.textModel,
+  }))
+  const [apiKey, setApiKey] = useState('')
 
   // 保存成功后父组件会重新拉 GET，配置变化即把表单对齐到服务端值。
   useEffect(() => { setPriceForm(toForm(config.prices)) }, [config.prices])
+  useEffect(() => {
+    setProviderForm({
+      apiBaseUrl: config.provider.apiBaseUrl || DEFAULT_IMAGE_BASE,
+      imageModel: config.provider.imageModel || DEFAULT_IMAGE_MODEL,
+      textModel: config.provider.textModel,
+    })
+  }, [config.provider])
 
   function updatePrice(size: Size, tier: 'regular' | 'vip', value: string) {
     setPriceForm(current => ({ ...current, [size]: { ...current[size], [tier]: value } }))
@@ -75,8 +91,21 @@ export function SystemSettings({ config, busy, onAction }: SystemSettingsProps) 
     await onAction({ action: 'reset-prices' }, '已恢复默认价格').catch(() => undefined)
   }
 
+  async function saveProvider() {
+    if (!window.confirm('保存后将用于后续生图请求。')) return
+    try {
+      await onAction({ action: 'save-provider-settings', ...providerForm, apiKey }, '生图服务设置已保存')
+      setApiKey('')
+    } catch {}
+  }
+
+  async function clearApiKey() {
+    if (!window.confirm('清除后将无法发起真实生图任务。')) return
+    await onAction({ action: 'clear-provider-key' }, 'API Key 已清除').catch(() => undefined)
+  }
+
   return <section className="mt-4">
-    <div className="flex items-center gap-2"><h2 className="text-sm font-medium">系统设置</h2><span className="text-xs text-[var(--app-muted)]">生图价格 · 仅管理员可见</span></div>
+    <div className="flex items-center gap-2"><h2 className="text-sm font-medium">系统设置</h2><span className="text-xs text-[var(--app-muted)]">仅管理员可见</span></div>
     <div className="mt-4 max-w-xl">
       <div className={cardClass}>
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -115,6 +144,55 @@ export function SystemSettings({ config, busy, onAction }: SystemSettingsProps) 
         <div className="mt-4 flex flex-wrap gap-2">
           <button type="button" disabled={busy} onClick={() => void savePrices()} className={primaryButton}>保存价格</button>
           <button type="button" disabled={busy} onClick={() => void restoreDefaultPrices()} className={secondaryButton}>恢复默认</button>
+        </div>
+      </div>
+      <div className={`${cardClass} mt-3`}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-medium">生图服务</h2>
+          <span className={`rounded-sm px-2 py-0.5 text-xs ${config.provider.configValid && config.provider.hasApiKey ? 'bg-[var(--app-raised)] text-[#52765d]' : 'bg-[#f5efdf] text-[#987a39]'}`}>
+            {config.provider.configValid ? (config.provider.hasApiKey ? '已配置' : '待填写 API Key') : '配置无效，请重新设置'}
+          </span>
+        </div>
+        <p className="mt-1 text-xs text-[var(--app-muted)]">支持兼容 OpenAI 接口的 HTTPS 服务或现有内置网关；新设置用于后续生成请求。</p>
+        <div className="mt-4 grid gap-3">
+          <label className="text-xs text-[var(--app-secondary)]">接口地址
+            <input
+              type="url" required maxLength={500} autoComplete="url"
+              aria-label="生图接口地址" value={providerForm.apiBaseUrl}
+              onChange={event => setProviderForm(current => ({ ...current, apiBaseUrl: event.target.value }))}
+              className={`mt-1 ${inputClass}`}
+            />
+          </label>
+          <label className="text-xs text-[var(--app-secondary)]">生图模型名称
+            <input
+              type="text" required maxLength={120} autoComplete="off"
+              aria-label="生图模型名称" value={providerForm.imageModel}
+              onChange={event => setProviderForm(current => ({ ...current, imageModel: event.target.value }))}
+              className={`mt-1 ${inputClass}`}
+            />
+          </label>
+          <label className="text-xs text-[var(--app-secondary)]">施工说明模型（选填）
+            <input
+              type="text" maxLength={120} autoComplete="off"
+              aria-label="施工说明模型" value={providerForm.textModel}
+              onChange={event => setProviderForm(current => ({ ...current, textModel: event.target.value }))}
+              className={`mt-1 ${inputClass}`}
+            />
+            <span className="mt-1 block text-[var(--app-muted)]">留空可关闭生成后自动提供的施工说明。</span>
+          </label>
+          <label className="text-xs text-[var(--app-secondary)]">API Key
+            <input
+              type="password" maxLength={2048} autoComplete="new-password" spellCheck={false}
+              aria-label="生图 API Key" placeholder={config.provider.hasApiKey ? '已加密保存；留空保持不变' : '输入 API Key'}
+              value={apiKey} onChange={event => setApiKey(event.target.value)}
+              className={`mt-1 ${inputClass}`}
+            />
+            <span className="mt-1 block text-[var(--app-muted)]">密钥只写入服务端加密配置，不会回显给浏览器或店铺账号。</span>
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={busy} onClick={() => void saveProvider()} className={primaryButton}>保存服务设置</button>
+            {config.provider.hasApiKey ? <button type="button" disabled={busy} onClick={() => void clearApiKey()} className={secondaryButton}>清除 API Key</button> : null}
+          </div>
         </div>
       </div>
     </div>

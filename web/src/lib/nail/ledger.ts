@@ -8,7 +8,16 @@ import {
   type PriceTable,
   type Size,
 } from './contracts'
-import { CONFIG_KEYS, getPrices, readConfigRow } from './system-config'
+import {
+  CONFIG_KEYS,
+  createStoredProviderConfig,
+  getProviderConfig,
+  getPrices,
+  makeStoredProviderConfig,
+  providerConfigAuditValue,
+  readConfigRow,
+  validateProviderInput,
+} from './system-config'
 
 type Transaction = Prisma.TransactionClient
 type CreditChannel = 'manual' | 'code'
@@ -404,6 +413,94 @@ export async function resetPrices(
         action: 'prices.reset',
         beforeJson: before?.value ?? JSON.stringify(DEFAULT_PRICES),
         afterJson: JSON.stringify(DEFAULT_PRICES),
+        operatorId: input.adminId,
+        operatorName: input.operatorName,
+      },
+    })
+  })
+}
+
+export async function setProviderSettings(
+  db: PrismaClient,
+  input: {
+    adminId: string
+    operatorName: string
+    apiBaseUrl: unknown
+    imageModel: unknown
+    textModel: unknown
+    apiKey: unknown
+  },
+): Promise<void> {
+  const checked = validateProviderInput(input)
+  if (!checked) throw new LedgerError('接口地址、模型名称或 API Key 格式无效')
+
+  await transact(db, async tx => {
+    await requireActor(tx, input.adminId, ['admin'])
+    const current = await getProviderConfig(tx)
+    const beforeValue = JSON.stringify({
+      apiBaseUrl: current.apiBaseUrl,
+      imageModel: current.imageModel,
+      textModel: current.textModel,
+      apiKeyConfigured: current.hasApiKey,
+    })
+    let config
+    try {
+      config = await makeStoredProviderConfig(tx, checked)
+    } catch (error) {
+      if (error instanceof Error && error.message === '请重新填写 API Key 以修复配置') {
+        throw new LedgerError(error.message)
+      }
+      throw error
+    }
+    const value = JSON.stringify(config)
+
+    await tx.systemConfig.upsert({
+      where: { key: CONFIG_KEYS.provider },
+      update: { value, updatedBy: input.operatorName },
+      create: { key: CONFIG_KEYS.provider, value, updatedBy: input.operatorName },
+    })
+    await tx.configAudit.create({
+      data: {
+        configKey: CONFIG_KEYS.provider,
+        action: 'provider.update',
+        beforeJson: beforeValue,
+        afterJson: providerConfigAuditValue(config),
+        operatorId: input.adminId,
+        operatorName: input.operatorName,
+      },
+    })
+  })
+}
+
+export async function clearProviderApiKey(
+  db: PrismaClient,
+  input: { adminId: string; operatorName: string },
+): Promise<void> {
+  await transact(db, async tx => {
+    await requireActor(tx, input.adminId, ['admin'])
+    const current = await getProviderConfig(tx)
+    if (!current.configValid) throw new LedgerError('接口配置无效，请先保存有效的接口设置')
+    if (!current.hasApiKey) return
+
+    const config = createStoredProviderConfig(current.apiBaseUrl, current.imageModel, current.textModel)
+    const value = JSON.stringify(config)
+    const beforeValue = JSON.stringify({
+      apiBaseUrl: current.apiBaseUrl,
+      imageModel: current.imageModel,
+      textModel: current.textModel,
+      apiKeyConfigured: current.hasApiKey,
+    })
+    await tx.systemConfig.upsert({
+      where: { key: CONFIG_KEYS.provider },
+      update: { value, updatedBy: input.operatorName },
+      create: { key: CONFIG_KEYS.provider, value, updatedBy: input.operatorName },
+    })
+    await tx.configAudit.create({
+      data: {
+        configKey: CONFIG_KEYS.provider,
+        action: 'provider.key.clear',
+        beforeJson: beforeValue,
+        afterJson: providerConfigAuditValue(config),
         operatorId: input.adminId,
         operatorName: input.operatorName,
       },

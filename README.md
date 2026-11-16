@@ -2,7 +2,7 @@
 
 在 `jimbb/chatgpt-image-portal` 的真实源码及历史上改造，使用独立的 New API 网关转发图片请求。上游说明与授权信息保留在下方；当前美甲站使用 `Dockerfile.nail` 和 `docker-compose.nail.yml`。
 
-API 密钥只通过服务器私有配置或受保护的网关管理入口设置，不提交到仓库，也不回显到页面和日志。
+管理员可在「系统设置 → 生图服务」修改接口地址、模型名称和 API Key。密钥加密保存在服务端，不提交到仓库，也不回显到页面和日志。Key 留空时保留原值，单独点击「清除 API Key」才会删除。
 
 ## 功能
 
@@ -41,6 +41,7 @@ git clone --recurse-submodules https://github.com/wangsaiqi2004/meijia.git
 cd meijia
 cp .env.example .env
 # 在服务器私有 .env 中填写随机密码、密钥与 CRON_SECRET。
+# NAIL_CONFIG_ENCRYPTION_KEY 使用 .env.example 中的命令生成，随后持久保存。
 install -d -o 1000 -g 1000 /www/nail-note/data
 install -d /www/nail-note/gateway
 docker build -f deploy/Dockerfile.gateway -t new-api-nail:rc47-codexing .
@@ -59,6 +60,8 @@ docker compose --env-file .env -f docker-compose.nail.yml up -d
 当前供应商实际模型名为 `gpt-image-2.5-sunburst`；旧文档中的 `sunbrust` 无效。1K 为 `1024x1536`，4K 为 `2160x3840`。多图固定为手部照在前、款式图在后。New API 的供应商兼容补丁仅使该渠道使用重复 `image` 字段，其他渠道沿用上游行为。
 
 `TEXT_MODEL` 留空时不请求施工说明；供应商当前没有可用文本模型。接入文本模型时需同时配置网关渠道、令牌模型范围和价格。
+
+管理员保存的生图服务设置优先于环境变量。自定义外部接口须为 HTTPS；内置网关地址 `http://nail-gateway:3000/v1` 同样可用。服务端的 `NAIL_CONFIG_ENCRYPTION_KEY` 是 Base64 编码的 32 字节随机密钥，须与数据库一起保管；丢失或更换后需要重新填写已保存的 API Key。
 
 数据目录为 `/www/nail-note/data`，网关数据目录为 `/www/nail-note/gateway`。升级前备份 SQLite 数据库与图片，备份需包含业务库中的 `SystemConfig`、`ConfigAudit` 两张新表，可使用 SQLite 在线备份接口；恢复时停站后替换数据并恢复文件属主 `1000:1000`。清理容器每分钟处理超时退款，每天清理过期会话和超过 7 天的原图。
 

@@ -17,6 +17,14 @@ export type PricingConfig = {
   priceSource: PriceSource
 }
 
+export type ProviderSettings = {
+  apiBaseUrl: string
+  imageModel: string
+  textModel: string
+  hasApiKey: boolean
+  configValid: boolean
+}
+
 export const PRICE_KEYS: readonly Size[] = ['1k', '4k']
 
 /** 默认价格的唯一真相源；数据库不预置配置行，靠它保证 DB 行 > 代码默认的回退链。 */

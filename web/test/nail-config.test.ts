@@ -22,18 +22,24 @@ const {
 } = await import('../src/lib/nail/contracts')
 const {
   CONFIG_KEYS,
+  getProviderConfig,
+  getPublicProviderSettings,
   getPrices,
   getPriceSource,
   getPricingConfig,
   readConfigRow,
+  validateProviderInput,
 } = await import('../src/lib/nail/system-config')
 const {
   LedgerError,
+  clearProviderApiKey,
   finishGeneration,
   reserveGeneration,
   resetPrices,
   setPrices,
+  setProviderSettings,
 } = await import('../src/lib/nail/ledger')
+const { decryptProviderSecret } = await import('../src/lib/nail/provider-secrets')
 
 const prisma = new PrismaClient()
 const adminId = randomUUID()
@@ -45,6 +51,11 @@ const userIds: string[] = []
 async function cleanConfig(): Promise<void> {
   await prisma.configAudit.deleteMany({ where: { configKey: CONFIG_KEYS.prices } })
   await prisma.systemConfig.deleteMany({ where: { key: CONFIG_KEYS.prices } })
+}
+
+async function cleanProviderConfig(): Promise<void> {
+  await prisma.configAudit.deleteMany({ where: { configKey: CONFIG_KEYS.provider } })
+  await prisma.systemConfig.deleteMany({ where: { key: CONFIG_KEYS.provider } })
 }
 
 async function fixture(credits = 1000) {
@@ -71,11 +82,13 @@ before(async () => {
   })
   await prisma.user.create({ data: { id: adminId, username: adminName, passwordHash: 'test-only', role: 'admin' } })
   await cleanConfig()
+  await cleanProviderConfig()
 })
 
 after(async () => {
   try {
     await cleanConfig()
+    await cleanProviderConfig()
     await prisma.generation.deleteMany({ where: { shopId: { in: shopIds } } })
     await prisma.rechargeOrder.deleteMany({ where: { shopId: { in: shopIds } } })
     await prisma.redeemCode.deleteMany({ where: { usedByShopId: { in: shopIds } } })
@@ -264,4 +277,145 @@ test('管理员可以覆盖或重置损坏的配置', async () => {
     await resetPrices(prisma, { adminId, operatorName: adminName })
     assert.equal(await getPriceSource(prisma), 'default')
   } finally { await cleanConfig() }
+})
+
+test('provider endpoint and model validation only accepts secure OpenAI-compatible configuration', () => {
+  const valid = validateProviderInput({
+    apiBaseUrl: 'https://images.example.test/custom/',
+    imageModel: 'vendor/image-v2',
+    textModel: '',
+    apiKey: 'test-key',
+  })
+  assert.deepEqual(valid, {
+    apiBaseUrl: 'https://images.example.test/custom/v1',
+    imageModel: 'vendor/image-v2',
+    textModel: '',
+    apiKey: 'test-key',
+  })
+  assert.equal(validateProviderInput({
+    apiBaseUrl: 'http://nail-gateway:3000/v1',
+    imageModel: 'image-v2',
+    textModel: '',
+    apiKey: '',
+  })?.apiBaseUrl, 'http://nail-gateway:3000/v1')
+  for (const apiBaseUrl of [
+    'http://images.example.test/v1',
+    'https://user:password@images.example.test/v1',
+    'https://images.example.test/v1?token=secret',
+    'not a url',
+  ]) {
+    assert.equal(validateProviderInput({ apiBaseUrl, imageModel: 'image-v2', textModel: '', apiKey: '' }), null)
+  }
+  assert.equal(validateProviderInput({ apiBaseUrl: 'https://images.example.test', imageModel: 'bad model', textModel: '', apiKey: '' }), null)
+})
+
+test('existing internal gateway and disabled notes survive the first administrator save', async () => {
+  await cleanProviderConfig()
+  const previous = {
+    IMAGE_API_BASE_URL: process.env.IMAGE_API_BASE_URL,
+    IMAGE_API_KEY: process.env.IMAGE_API_KEY,
+    TEXT_MODEL: process.env.TEXT_MODEL,
+  }
+  process.env.IMAGE_API_BASE_URL = 'http://nail-gateway:3000/v1'
+  process.env.IMAGE_API_KEY = 'legacy-gateway-test-key'
+  process.env.TEXT_MODEL = ''
+  try {
+    const current = await getPublicProviderSettings(prisma)
+    assert.equal(current.configValid, true)
+    assert.equal(current.textModel, '')
+    assert.equal(current.hasApiKey, true)
+    await setProviderSettings(prisma, {
+      adminId, operatorName: adminName, ...current, apiKey: '',
+    })
+    assert.equal((await getProviderConfig(prisma)).apiKey, 'legacy-gateway-test-key')
+    assert.equal((await getPublicProviderSettings(prisma)).textModel, '')
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+    await cleanProviderConfig()
+  }
+})
+
+test('custom provider credentials are encrypted, redacted from admin DTOs/audits, and only admins can modify them', async () => {
+  await cleanProviderConfig()
+  const credential = 'provider-token-test-never-persist-plaintext'
+  const settings = {
+    apiBaseUrl: 'https://images.example.test/v1',
+    imageModel: 'vendor/image-v2',
+    textModel: 'vendor/text-v1',
+    apiKey: credential,
+  }
+  try {
+    await setProviderSettings(prisma, { adminId, operatorName: adminName, ...settings })
+    const row = await prisma.systemConfig.findUniqueOrThrow({ where: { key: CONFIG_KEYS.provider } })
+    assert.equal(row.value.includes(credential), false)
+    const stored = JSON.parse(row.value) as { encryptedApiKey: string }
+    assert.equal(stored.encryptedApiKey.startsWith('v1.'), true)
+    assert.equal(decryptProviderSecret(stored.encryptedApiKey), credential)
+    assert.deepEqual(await getPublicProviderSettings(), {
+      apiBaseUrl: settings.apiBaseUrl,
+      imageModel: settings.imageModel,
+      textModel: settings.textModel,
+      hasApiKey: true,
+      configValid: true,
+    })
+    assert.equal((await getProviderConfig()).apiKey, credential)
+    const audits = await prisma.configAudit.findMany({ where: { configKey: CONFIG_KEYS.provider } })
+    assert.equal(audits.length, 1)
+    assert.equal(JSON.stringify(audits).includes(credential), false)
+    assert.equal(JSON.stringify(audits).includes(stored.encryptedApiKey), false)
+
+    await setProviderSettings(prisma, {
+      adminId,
+      operatorName: adminName,
+      ...settings,
+      apiBaseUrl: 'https://images-new.example.test/v1',
+      apiKey: '',
+    })
+    assert.equal((await getProviderConfig()).apiKey, credential)
+
+    const { userId } = await fixture()
+    await assert.rejects(setProviderSettings(prisma, {
+      adminId: userId, operatorName: 'owner', ...settings,
+    }), LedgerError)
+    assert.equal(await getPublicProviderSettings().then(value => value.apiBaseUrl), 'https://images-new.example.test/v1')
+
+    await clearProviderApiKey(prisma, { adminId, operatorName: adminName })
+    assert.equal((await getProviderConfig()).apiKey, '')
+    const history = await prisma.configAudit.findMany({ where: { configKey: CONFIG_KEYS.provider } })
+    assert.equal(history.length, 3)
+    assert.equal(history.at(-1)?.action, 'provider.key.clear')
+    assert.equal(JSON.stringify(history).includes(credential), false)
+    assert.equal(await prisma.configAudit.count({ where: { configKey: CONFIG_KEYS.provider, operatorId: userId } }), 0)
+  } finally {
+    await cleanProviderConfig()
+  }
+})
+
+test('invalid encrypted provider settings require a replacement API key and admins can repair them', async () => {
+  await cleanProviderConfig()
+  const settings = {
+    apiBaseUrl: 'https://images.example.test/v1',
+    imageModel: 'image-v2',
+    textModel: '',
+  }
+  try {
+    await prisma.systemConfig.create({
+      data: { key: CONFIG_KEYS.provider, value: JSON.stringify({
+        version: 1, ...settings, encryptedApiKey: 'v1.bad.bad.bad',
+      }) },
+    })
+    assert.equal((await getPublicProviderSettings()).configValid, false)
+    await assert.rejects(setProviderSettings(prisma, {
+      adminId, operatorName: adminName, ...settings, apiKey: '',
+    }), /重新填写 API Key/)
+    await setProviderSettings(prisma, {
+      adminId, operatorName: adminName, ...settings, apiKey: 'repaired-test-key',
+    })
+    assert.equal((await getProviderConfig()).apiKey, 'repaired-test-key')
+  } finally {
+    await cleanProviderConfig()
+  }
 })

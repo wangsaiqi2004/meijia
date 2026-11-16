@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { NailPageFrame } from '@/components/nail/nail-page-frame'
 import { SystemSettings } from '@/components/nail/system-settings'
 import { formatDate, formatPoints, nailFetch, requestKey, styleImageUrl } from '@/lib/nail/client'
-import type { PricingConfig } from '@/lib/nail/contracts'
+import type { PricingConfig, ProviderSettings } from '@/lib/nail/contracts'
 
 type Shop = {
   id: string
@@ -29,7 +29,7 @@ type Dashboard = {
   totals: { status: string; _count: { _all: number }; _sum: { apiCostCents: number | null } }[]
   styles: Style[]
   unusedCodes: number
-  config: PricingConfig
+  config: PricingConfig & { provider: ProviderSettings }
 }
 
 function AdminContent() {
