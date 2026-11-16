@@ -6,7 +6,7 @@ import { ArrowRight, Camera, Check, CircleAlert, Download, ImagePlus, LoaderCirc
 import { AnimatePresence, LayoutGroup, MotionConfig, motion } from 'motion/react'
 import { toast } from 'sonner'
 import { formatPoints, generationImageUrl, nailFetch, requestKey, styleImageUrl, uploadImageUrl, type NailUser } from '@/lib/nail/client'
-import { generationPrice } from '@/lib/nail/pricing'
+import type { PriceTable, PriceSource } from '@/lib/nail/contracts'
 import { ImageLightbox } from '@/components/nail/image-lightbox'
 import { ShopStyleManager } from '@/components/nail/shop-style-manager'
 
@@ -83,6 +83,7 @@ export function NailWorkbench({ user }: { user: NailUser }) {
   const [size, setSize] = useState<'1k' | '4k'>('1k')
   const [balance, setBalance] = useState<number | null>(null)
   const [isVip, setIsVip] = useState(false)
+  const [prices, setPrices] = useState<PriceTable | null>(null)
   const [uploadingHand, setUploadingHand] = useState(false)
   const [uploadingStyle, setUploadingStyle] = useState(false)
   const [generating, setGenerating] = useState(false)
@@ -94,7 +95,8 @@ export function NailWorkbench({ user }: { user: NailUser }) {
   const submitLock = useRef(false)
   const submission = useRef({ signature: '', key: '' })
   const categories = ['全部', ...new Set(styles.map(item => item.category))]
-  const price = generationPrice(size, isVip)
+  const priceFor = (s: '1k' | '4k') => prices ? prices[s][isVip ? 'vip' : 'regular'] : null
+  const price = priceFor(size)
 
   const filteredStyles = useMemo(() => styles.filter(item => category === '全部' || item.category === category), [styles, category])
 
@@ -115,13 +117,15 @@ export function NailWorkbench({ user }: { user: NailUser }) {
         setStyleName(rows[0].name)
       }
     }).catch(error => toast.error(error instanceof Error ? error.message : '加载款式失败'))
-    void nailFetch<{ shop: { credits: number; isVip: boolean } }>('/api/nail/shop').then(({ shop }) => { setBalance(shop.credits); setIsVip(shop.isVip) }).catch(() => undefined)
+    void nailFetch<{ shop: { credits: number; isVip: boolean }; prices: PriceTable; priceSource: PriceSource }>('/api/nail/shop')
+      .then(({ shop, prices: rows }) => { setBalance(shop.credits); setIsVip(shop.isVip); setPrices(rows) })
+      .catch(() => undefined)
   }, [])
 
+  const activeTask = useRef('')
   const loadTask = useCallback(async (id: string) => {
     const data = await nailFetch<{ generation: Generation }>(`/api/nail/generate?id=${encodeURIComponent(id)}`)
-    setGeneration(data.generation)
-    setGenerationId(data.generation.id)
+    if (activeTask.current === id) setGeneration(data.generation)
     return data.generation
   }, [])
 
@@ -129,6 +133,7 @@ export function NailWorkbench({ user }: { user: NailUser }) {
     const task = searchParams.get('task')
     if (!task || handledTask.current === task) return
     handledTask.current = task
+    activeTask.current = task
     setGenerationId(task)
     void loadTask(task).then(item => {
       if (item.inputHandPath) { setHandPath(item.inputHandPath); setHandPreview(uploadImageUrl(item.inputHandPath)) }
@@ -153,28 +158,32 @@ export function NailWorkbench({ user }: { user: NailUser }) {
   }, [generation?.inputStylePath, searchParams, styles])
 
   useEffect(() => {
-    if (!generationId || generation?.status === 'success' || generation?.status === 'refunded') return
+    if (!generationId) return
+    if (generation?.status === 'success' || generation?.status === 'refunded') {
+      setGenerating(false)
+      submitLock.current = false
+      return
+    }
     let active = true
     const started = Date.now()
+    let polling = false
     const timer = window.setInterval(() => {
       setElapsed(Math.floor((Date.now() - started) / 1000))
+      if (polling) return
+      polling = true
       void loadTask(generationId).then(item => {
         if (!active) return
         if (item.status === 'success' || item.status === 'refunded') {
           window.clearInterval(timer)
           setGenerating(false)
           submitLock.current = false
-          void nailFetch<{ shop: { credits: number } }>('/api/nail/shop').then(({ shop }) => setBalance(shop.credits)).catch(() => undefined)
+          void nailFetch<{ shop: { credits: number }; prices: PriceTable; priceSource: PriceSource }>('/api/nail/shop')
+            .then(({ shop, prices: rows }) => { setBalance(shop.credits); setPrices(rows) })
+            .catch(() => undefined)
           if (item.status === 'refunded') toast.error(item.failReason || '生成失败，点数已退回')
           else document.getElementById('generation-result')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
         }
-      }).catch(() => undefined)
-      if (Date.now() - started > 125_000) {
-        window.clearInterval(timer)
-        setGenerating(false)
-        submitLock.current = false
-        toast.error('等待时间较长，请到生成记录中查看任务状态')
-      }
+      }).catch(() => undefined).finally(() => { polling = false })
     }, 1800)
     return () => { active = false; window.clearInterval(timer) }
   }, [generation?.status, generationId, loadTask])
@@ -230,16 +239,25 @@ export function NailWorkbench({ user }: { user: NailUser }) {
 
   async function generate(repeat = false) {
     if (submitLock.current) return
-    if (balance !== null && balance < price) return toast.error('点数不足，请先兑换充值码')
-    if (!handPath) return toast.error('请先上传顾客的手部照片')
-    if (!styleId && !stylePath) return toast.error('请选择款式或上传参考图')
+    if (!repeat && !handPath) return toast.error('请先上传顾客的手部照片')
+    if (!repeat && !styleId && !stylePath) return toast.error('请选择款式或上传参考图')
     if (uploadingHand || uploadingStyle) return toast.error('图片仍在上传，请稍等')
     submitLock.current = true
     setGenerating(true)
     const originalId = repeat ? generationId : ''
+    activeTask.current = ''
+    setGenerationId('')
     setGeneration(null)
     setElapsed(0)
     try {
+      // 提交前重拉价格与余额；不能依赖 setState 后的异步 price。
+      const fresh = await nailFetch<{ shop: { credits: number; isVip: boolean }; prices: PriceTable; priceSource: PriceSource }>('/api/nail/shop')
+      const latestPrice = fresh.prices[size][fresh.shop.isVip ? 'vip' : 'regular']
+      setBalance(fresh.shop.credits)
+      setIsVip(fresh.shop.isVip)
+      setPrices(fresh.prices)
+      if (price !== null && latestPrice !== price) throw new Error(`价格已更新为 ${latestPrice} 点，请确认后重新生成`)
+      if (fresh.shop.credits < latestPrice) throw new Error('点数不足，请先兑换充值码')
       const form = new FormData()
       form.set('handPath', handPath)
       form.set('styleId', styleId)
@@ -253,13 +271,18 @@ export function NailWorkbench({ user }: { user: NailUser }) {
       form.set('idempotencyKey', submission.current.key)
       const started = await nailFetch<{ id: string; status: string; filtered?: boolean }>(
         originalId ? `/api/nail/history/${encodeURIComponent(originalId)}` : '/api/nail/generate',
-        { method: 'POST', body: originalId ? JSON.stringify({ idempotencyKey: submission.current.key }) : form },
+        { method: 'POST', body: originalId ? JSON.stringify({ idempotencyKey: submission.current.key, size }) : form },
       )
       submission.current = { signature: '', key: '' }
+      activeTask.current = started.id
       setGenerationId(started.id)
       window.history.replaceState(null, '', `/?task=${encodeURIComponent(started.id)}`)
       if (started.filtered) toast('已移除不适合效果预览的描述词，保留款式相关要求')
-      await loadTask(started.id)
+      await loadTask(started.id).catch(() => {
+        toast('任务已提交，正在重新获取进度')
+      })
+      void nailFetch<{ shop: { credits: number } }>('/api/nail/shop')
+        .then(({ shop }) => setBalance(shop.credits)).catch(() => undefined)
       if (started.status !== 'pending') {
         setGenerating(false)
         submitLock.current = false
@@ -272,6 +295,7 @@ export function NailWorkbench({ user }: { user: NailUser }) {
   }
 
   function reset() {
+    activeTask.current = ''
     setGeneration(null)
     setGenerationId('')
     setGenerating(false)
@@ -339,15 +363,15 @@ export function NailWorkbench({ user }: { user: NailUser }) {
               {(['preview', 'promo'] as const).map((value, index) => <button key={value} type="button" aria-pressed={mode === value} onClick={() => setMode(value)} className={`relative h-9 rounded-sm text-xs font-medium transition-colors duration-150 ${mode === value ? 'text-[#244938]' : 'text-[var(--app-secondary)]'}`}>{mode === value ? <motion.span layoutId="mode-indicator" className="absolute inset-0 rounded-sm bg-white shadow-sm" /> : null}<span className="relative">{index === 0 ? '真实沟通版' : '宣传展示版'}</span></button>)}
             </div></div>
             <div><p className="mb-2 text-xs font-medium text-[var(--app-secondary)]">图片尺寸</p><div className="grid grid-cols-2 rounded-md bg-[var(--app-raised)] p-1">
-              {(['1k', '4k'] as const).map((value, index) => <button key={value} type="button" aria-pressed={size === value} onClick={() => setSize(value)} className={`relative h-9 rounded-sm text-xs font-medium transition-colors duration-150 ${size === value ? 'text-[#244938]' : 'text-[var(--app-secondary)]'}`}>{size === value ? <motion.span layoutId="size-indicator" className="absolute inset-0 rounded-sm bg-white shadow-sm" /> : null}<span className="relative">{index === 0 ? `标准 1K · ${generationPrice('1k', isVip)} 点` : `高清 4K · ${generationPrice('4k', isVip)} 点`}</span></button>)}
+              {(['1k', '4k'] as const).map((value, index) => <button key={value} type="button" aria-pressed={size === value} onClick={() => setSize(value)} className={`relative h-9 rounded-sm text-xs font-medium transition-colors duration-150 ${size === value ? 'text-[#244938]' : 'text-[var(--app-secondary)]'}`}>{size === value ? <motion.span layoutId="size-indicator" className="absolute inset-0 rounded-sm bg-white shadow-sm" /> : null}<span className="relative">{index === 0 ? `标准 1K · ${priceFor('1k') ?? '—'} 点` : `高清 4K · ${priceFor('4k') ?? '—'} 点`}</span></button>)}
             </div></div>
           </div>
           {balance !== null ? <p className="mt-3 text-xs text-[var(--app-muted)]">店铺可用 {formatPoints(balance)} 点{user.role === 'staff' ? ' · 与店主共用点数' : ''}</p> : null}
-          <button type="button" disabled={generating || uploadingHand || uploadingStyle || !handPath || (!styleId && !stylePath) || balance !== null && balance < price} onClick={() => void generate()} className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-md bg-[#173b32] px-4 text-sm font-medium text-white transition hover:bg-[#245344] disabled:cursor-not-allowed disabled:bg-[#9eafa3]">
+          <button type="button" disabled={generating || uploadingHand || uploadingStyle || !handPath || (!styleId && !stylePath) || price === null} onClick={() => void generate()} className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-md bg-[#173b32] px-4 text-sm font-medium text-white transition hover:bg-[#245344] disabled:cursor-not-allowed disabled:bg-[#9eafa3]">
             {generating ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowRight className="size-4" />}
-            {generating ? `生成中 · 已等待 ${elapsed} 秒` : `生成效果预览 · ${price} 点`}
+            {generating ? `生成中 · 已等待 ${elapsed} 秒` : `生成效果预览 · ${price ?? '—'} 点`}
           </button>
-          {balance !== null && balance < price ? <p className="mt-2 flex items-center gap-1 text-xs text-[#ad6a4d]"><CircleAlert className="size-4" />点数不足，请联系店主兑换充值码</p> : null}
+          {balance !== null && price !== null && balance < price ? <p className="mt-2 flex items-center gap-1 text-xs text-[#ad6a4d]"><CircleAlert className="size-4" />点数不足，请联系店主兑换充值码</p> : null}
         </section>
 
         {generation ? <section className="scroll-mt-20 border-b border-[var(--app-border)] pb-8" id="generation-result">
@@ -369,7 +393,7 @@ export function NailWorkbench({ user }: { user: NailUser }) {
             {generation.notes.steps?.length ? <ol className="mt-2 grid gap-2 text-xs leading-5 text-[var(--app-secondary)] sm:grid-cols-2">{generation.notes.steps.map((step, index) => <li key={`${index}-${step}`}><span className="mr-1.5 font-medium text-[var(--app-secondary)]">{index + 1}.</span>{step}</li>)}</ol> : null}
             {generation.notes.warnings?.length ? <p className="mt-2 text-xs leading-5 text-[#a3664b]">留意：{generation.notes.warnings.join('；')}</p> : null}
           </div> : null}
-          {generation.status === 'success' ? <button type="button" disabled={generating || !handPath || !generation.inputStylePath} onClick={() => void generate(true)} className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-md border border-[var(--app-border)] bg-white text-xs font-medium disabled:opacity-50"><RefreshCw className="size-4" />同款再生成 · {price} 点</button> : null}
+          {generation.status === 'success' ? <button type="button" disabled={generating || !handPath || !generation.inputStylePath} onClick={() => void generate(true)} className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-md border border-[var(--app-border)] bg-white text-xs font-medium disabled:opacity-50"><RefreshCw className="size-4" />同款再生成 · {price ?? '—'} 点</button> : null}
           <p className="mt-4 flex items-start gap-2 text-xs leading-5 text-[var(--app-muted)]"><CircleAlert className="mt-0.5 size-4 shrink-0" />图片用于与顾客沟通款式方向，实际施工前请美甲师根据甲面和现有材料确认细节。</p>
         </section> : null}
       </div>

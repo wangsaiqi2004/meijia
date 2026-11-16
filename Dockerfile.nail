@@ -9,7 +9,7 @@ RUN npm ci
 COPY web ./
 COPY prompts /app/prompts
 ENV DATABASE_URL=file:/app/data/nail.db
-RUN npx prisma generate && npm run build
+RUN npx prisma generate && npm run test:nail && npm run build
 
 FROM node:24-bookworm-slim AS app
 ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0 \
@@ -26,7 +26,9 @@ COPY --from=build /app/web/prisma ./prisma
 COPY --from=build /app/web/scripts ./scripts
 COPY --from=build /app/web/src/lib/nail ./src/lib/nail
 COPY --from=build /app/prompts /app/prompts
-RUN chmod 755 ./scripts/start-nail.sh && mkdir -p /app/data && chown node:node /app/data
+RUN sed -i 's/\r$//' ./scripts/start-nail.sh && \
+    chmod 755 ./scripts/start-nail.sh && \
+    mkdir -p /app/data && chown node:node /app/data
 USER node
 EXPOSE 3000
 CMD ["./scripts/start-nail.sh"]

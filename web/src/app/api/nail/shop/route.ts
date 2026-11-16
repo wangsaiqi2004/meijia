@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { getCurrentUser } from '@/lib/nail/auth'
 import { db } from '@/lib/nail/db'
 import { redeemCode } from '@/lib/nail/ledger'
+import { getPricingConfig } from '@/lib/nail/system-config'
 
 export async function GET() {
   const user = await getCurrentUser()
@@ -21,7 +22,8 @@ export async function GET() {
     if (item.status === 'refunded') entries.push({ id: `refund-${item.id}`, credits: item.creditsCost, remark: `${item.styleName} · 失败退点`, createdAt: item.finishedAt || item.createdAt, channel: '自动退点' })
   }
   entries.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-  return NextResponse.json({ shop, orders: entries.slice(0, 30) })
+  const config = await getPricingConfig(db)
+  return NextResponse.json({ shop, orders: entries.slice(0, 30), ...config })
 }
 
 export async function POST(request: Request) {

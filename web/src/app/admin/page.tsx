@@ -4,7 +4,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Check, Copy, Crown, Download, ImageIcon, LoaderCircle, Pencil, Plus, RefreshCw, Shield, Store, ToggleLeft, ToggleRight, Users, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { NailPageFrame } from '@/components/nail/nail-page-frame'
+import { SystemSettings } from '@/components/nail/system-settings'
 import { formatDate, formatPoints, nailFetch, requestKey, styleImageUrl } from '@/lib/nail/client'
+import type { PricingConfig } from '@/lib/nail/contracts'
 
 type Shop = {
   id: string
@@ -27,6 +29,7 @@ type Dashboard = {
   totals: { status: string; _count: { _all: number }; _sum: { apiCostCents: number | null } }[]
   styles: Style[]
   unusedCodes: number
+  config: PricingConfig
 }
 
 function AdminContent() {
@@ -88,6 +91,8 @@ function AdminContent() {
 
   async function makeCodes(event: React.FormEvent) {
     event.preventDefault()
+    if (actionLock.current) return
+    actionLock.current = true
     setBusy('redeem-codes')
     try {
       const result = await nailFetch<{ codes: string[] }>('/api/nail/admin', { method: 'POST', body: JSON.stringify({ action: 'redeem-codes', points: Number(codeForm.points), count: Number(codeForm.count) }) })
@@ -98,6 +103,7 @@ function AdminContent() {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '生成兑换码失败')
     } finally {
+      actionLock.current = false
       setBusy('')
     }
   }
@@ -163,6 +169,8 @@ function AdminContent() {
         { label: '估算 API 成本', value: `¥${(apiCost / 100).toFixed(2)}`, icon: Store },
       ].map(item => <div key={item.label} className="rounded-lg border border-[var(--app-border)] bg-white p-4 sm:p-4"><div className="flex items-center justify-between text-xs text-[var(--app-muted)]"><span>{item.label}</span><item.icon className="size-4 text-[#78917d]" /></div><p className="mt-2 text-[22px] leading-none font-medium text-[var(--app-ink)]">{item.value}</p></div>)}
     </section>
+
+    <SystemSettings config={dashboard.config} busy={Boolean(busy)} onAction={action} />
 
     <section className="mt-4 rounded-lg border border-[var(--app-border)] bg-white">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--app-border)] px-4 py-4 sm:px-5"><div><div className="flex items-center gap-2"><Store className="size-4 text-[var(--app-secondary)]" /><h2 className="text-sm font-medium">店铺</h2><span className="rounded-sm bg-[var(--app-raised)] px-2 py-0.5 text-xs text-[var(--app-secondary)]">{dashboard.shops.length}</span></div><p className="mt-1 text-xs text-[var(--app-muted)]">创建账号、调整点数及管理店铺状态。</p></div><button type="button" onClick={() => setNewShop(value => !value)} className="flex h-9 items-center gap-2 rounded-md bg-[#173b32] px-3 text-xs font-medium text-white"><Plus className="size-4" />开通店铺</button></div>

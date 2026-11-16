@@ -1,10 +1,15 @@
 import { Prisma, type Generation, type PrismaClient } from '@prisma/client'
 import { randomBytes, randomUUID } from 'node:crypto'
 import bcrypt from 'bcryptjs'
-import { PRICES } from './pricing'
-export { PRICES } from './pricing'
+import {
+  DEFAULT_PRICES,
+  PRICE_KEYS,
+  validatePriceTable,
+  type PriceTable,
+  type Size,
+} from './contracts'
+import { CONFIG_KEYS, getPrices, readConfigRow } from './system-config'
 
-type Size = keyof typeof PRICES
 type Transaction = Prisma.TransactionClient
 type CreditChannel = 'manual' | 'code'
 
@@ -257,7 +262,7 @@ export async function reserveGeneration(db: PrismaClient, input: Reservation): P
   required(input.styleName, '款式', 60)
   required(input.inputHandPath, '手部照片', 500)
   required(input.inputStylePath, '款式图片', 500)
-  if (!(input.size in PRICES) || !['preview', 'promo'].includes(input.mode) || input.extraPrompt.length > 200) {
+  if (!(PRICE_KEYS as readonly string[]).includes(input.size) || !['preview', 'promo'].includes(input.mode) || input.extraPrompt.length > 200) {
     throw new LedgerError('生成参数无效')
   }
   const key = { shopId_idempotencyKey: { shopId: input.shopId, idempotencyKey: input.idempotencyKey } }
@@ -269,7 +274,8 @@ export async function reserveGeneration(db: PrismaClient, input: Reservation): P
         if (!matches(duplicate, input)) throw new LedgerError('重复请求的参数不一致')
         return duplicate
       }
-      const price = PRICES[input.size]
+      const prices = await getPrices(tx)
+      const price = prices[input.size]
       // One conditional write serializes balance and concurrent-task checks on SQLite.
       const changed = await tx.$executeRaw`
         UPDATE "Shop"
@@ -305,10 +311,20 @@ export async function finishGeneration(
   db: PrismaClient,
   generationId: string,
   result: { success: true; outputPath: string; apiCostCents?: number } | { success: false; reason: string },
+  expiredBefore?: Date,
 ): Promise<boolean> {
   return transact(db, async tx => {
     const update = await tx.generation.updateMany({
-      where: { id: generationId, status: 'pending' },
+      where: {
+        id: generationId,
+        status: 'pending',
+        ...(expiredBefore ? {
+          OR: [
+            { workerStartedAt: { lte: expiredBefore } },
+            { workerStartedAt: null, createdAt: { lte: expiredBefore } },
+          ],
+        } : {}),
+      },
       data: result.success
         ? { status: 'success', outputPath: required(result.outputPath, '效果图片', 500), apiCostCents: result.apiCostCents, finishedAt: new Date() }
         : { status: 'refunded', failReason: result.reason.slice(0, 500), finishedAt: new Date() },
@@ -322,15 +338,75 @@ export async function finishGeneration(
   })
 }
 
-export async function refundExpired(db: PrismaClient, timeoutMs = 120_000): Promise<number> {
+export async function refundExpired(db: PrismaClient, timeoutMs = 180_000): Promise<number> {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new LedgerError('超时时间无效')
+  const expiredBefore = new Date(Date.now() - timeoutMs)
   const expired = await db.generation.findMany({
-    where: { status: 'pending', createdAt: { lte: new Date(Date.now() - timeoutMs) } },
+    where: {
+      status: 'pending',
+      OR: [
+        { workerStartedAt: { lte: expiredBefore } },
+        { workerStartedAt: null, createdAt: { lte: expiredBefore } },
+      ],
+    },
     select: { id: true },
   })
   let refunded = 0
   for (const task of expired) {
-    if (await finishGeneration(db, task.id, { success: false, reason: '生成超时，点数已退回' })) refunded++
+    if (await finishGeneration(db, task.id, { success: false, reason: '生成超时，点数已退回' }, expiredBefore)) refunded++
   }
   return refunded
+}
+
+/**
+ * 价格与审计写在同一事务，复用 transact() 的 writeTail 串行与重试。
+ */
+export async function setPrices(
+  db: PrismaClient,
+  input: { adminId: string; operatorName: string; prices: PriceTable },
+): Promise<void> {
+  const checked = validatePriceTable(input.prices)
+  if (!checked.ok) throw new LedgerError(checked.message)
+  const value = JSON.stringify(checked.prices)
+  await transact(db, async tx => {
+    await requireActor(tx, input.adminId, ['admin'])
+    const before = await readConfigRow(tx, CONFIG_KEYS.prices)
+    await tx.systemConfig.upsert({
+      where: { key: CONFIG_KEYS.prices },
+      update: { value, updatedBy: input.operatorName },
+      create: { key: CONFIG_KEYS.prices, value, updatedBy: input.operatorName },
+    })
+    await tx.configAudit.create({
+      data: {
+        configKey: CONFIG_KEYS.prices,
+        action: 'prices.update',
+        beforeJson: before?.value ?? JSON.stringify(DEFAULT_PRICES),
+        afterJson: value,
+        operatorId: input.adminId,
+        operatorName: input.operatorName,
+      },
+    })
+  })
+}
+
+/** 删除配置行即回到 DEFAULT_PRICES，不写入默认价格行以免破坏回退链。 */
+export async function resetPrices(
+  db: PrismaClient,
+  input: { adminId: string; operatorName: string },
+): Promise<void> {
+  await transact(db, async tx => {
+    await requireActor(tx, input.adminId, ['admin'])
+    const before = await readConfigRow(tx, CONFIG_KEYS.prices)
+    await tx.systemConfig.deleteMany({ where: { key: CONFIG_KEYS.prices } })
+    await tx.configAudit.create({
+      data: {
+        configKey: CONFIG_KEYS.prices,
+        action: 'prices.reset',
+        beforeJson: before?.value ?? JSON.stringify(DEFAULT_PRICES),
+        afterJson: JSON.stringify(DEFAULT_PRICES),
+        operatorId: input.adminId,
+        operatorName: input.operatorName,
+      },
+    })
+  })
 }

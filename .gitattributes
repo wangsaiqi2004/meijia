@@ -1,1 +1,2 @@
 deploy/*.patch -whitespace
+*.sh text eol=lf

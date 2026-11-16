@@ -7,14 +7,18 @@ import {
   createShopAccount,
   LedgerError,
   manualCredit,
+  resetPrices,
+  setPrices,
   setShopStatus,
   setShopVip,
 } from '@/lib/nail/ledger'
+import { getPricingConfig } from '@/lib/nail/system-config'
+import { validatePriceTable } from '@/lib/nail/contracts'
 
 export async function GET() {
   const user = await getCurrentUser()
   if (user?.role !== 'admin') return NextResponse.json({ error: '没有管理权限' }, { status: 403 })
-  const [shops, today, totals, styles, codes, shopUsage] = await Promise.all([
+  const [shops, today, totals, styles, codes, shopUsage, config] = await Promise.all([
     db.shop.findMany({
       orderBy: { createdAt: 'desc' },
       include: { _count: { select: { users: true, generations: true } } },
@@ -28,6 +32,7 @@ export async function GET() {
       _count: { _all: true },
       _sum: { creditsCost: true, apiCostCents: true },
     }),
+    getPricingConfig(),
   ])
   return NextResponse.json({
     shops: shops.map(shop => {
@@ -39,7 +44,7 @@ export async function GET() {
         apiCostCents: usage.reduce((sum, row) => sum + (row._sum.apiCostCents || 0), 0),
       }
     }),
-    today, totals, styles, unusedCodes: codes,
+    today, totals, styles, unusedCodes: codes, config,
   })
 }
 
@@ -122,9 +127,21 @@ export async function POST(request: Request) {
       await db.styleLibrary.deleteMany({ where: { id: String(body?.id || ''), shopId: null } })
       return NextResponse.json({ ok: true })
     }
+    if (action === 'save-prices') {
+      const checked = validatePriceTable(body?.prices)
+      if (!checked.ok) throw new LedgerError(checked.message)
+      await setPrices(db, { adminId: user.id, operatorName: user.username, prices: checked.prices })
+      return NextResponse.json({ ok: true })
+    }
+    if (action === 'reset-prices') {
+      await resetPrices(db, { adminId: user.id, operatorName: user.username })
+      return NextResponse.json({ ok: true })
+    }
     return NextResponse.json({ error: '未知操作' }, { status: 400 })
   } catch (error) {
+    // 内部异常固定文案，避免 Prisma 报错把请求体或密钥带进响应。
     const status = error instanceof LedgerError ? 400 : 500
-    return NextResponse.json({ error: error instanceof Error ? error.message : '操作失败' }, { status })
+    const message = error instanceof LedgerError ? error.message : '操作失败，请稍后重试'
+    return NextResponse.json({ error: message }, { status })
   }
 }

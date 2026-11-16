@@ -48,7 +48,7 @@ docker compose --env-file .env -f docker-compose.nail.yml build nail-app
 docker compose --env-file .env -f docker-compose.nail.yml up -d nail-gateway
 ```
 
-通过 SSH 隧道进入独立网关 `127.0.0.1:19126`，初始化管理员、关闭注册、添加 OpenAI 兼容渠道，配置图片模型价格并创建受限令牌。把渠道上游设为供应商地址，把站点 `IMAGE_API_BASE_URL` 设为 `http://nail-gateway:3000/v1`，`IMAGE_API_KEY` 设为网关令牌，再启动站点：
+通过 SSH 隧道进入独立网关 `127.0.0.1:19126`，初始化管理员、关闭注册、添加 OpenAI 兼容渠道，配置图片模型价格并创建受限令牌。把渠道上游设为供应商地址，把站点 `IMAGE_API_BASE_URL` 设为 `http://nail-gateway:3000/v1`，`IMAGE_API_KEY` 设为网关令牌，再启动站点。
 
 ```sh
 docker compose --env-file .env -f docker-compose.nail.yml up -d
@@ -60,7 +60,7 @@ docker compose --env-file .env -f docker-compose.nail.yml up -d
 
 `TEXT_MODEL` 留空时不请求施工说明；供应商当前没有可用文本模型。接入文本模型时需同时配置网关渠道、令牌模型范围和价格。
 
-数据目录为 `/www/nail-note/data`，网关数据目录为 `/www/nail-note/gateway`。升级前备份 SQLite 数据库与图片，可使用 SQLite 在线备份接口；恢复时停站后替换数据并恢复文件属主 `1000:1000`。清理容器每分钟处理超时退款，每天清理过期会话和超过 7 天的原图。
+数据目录为 `/www/nail-note/data`，网关数据目录为 `/www/nail-note/gateway`。升级前备份 SQLite 数据库与图片，备份需包含业务库中的 `SystemConfig`、`ConfigAudit` 两张新表，可使用 SQLite 在线备份接口；恢复时停站后替换数据并恢复文件属主 `1000:1000`。清理容器每分钟处理超时退款，每天清理过期会话和超过 7 天的原图。
 
 ## 验证
 

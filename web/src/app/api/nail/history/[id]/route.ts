@@ -33,7 +33,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     await readStoredFile(original.inputHandPath)
     await refundExpired(db)
     const mode = original.mode === 'promo' ? 'promo' : 'preview'
-    const size = original.size
+    const size = body?.size === '1k' || body?.size === '4k' ? body.size : original.size
     const prompt = await buildNailPrompt({ mode, styleName: original.styleName, extraPrompt: original.extraPrompt, size })
     const generation = await reserveGeneration(db, {
       shopId: user.shopId,

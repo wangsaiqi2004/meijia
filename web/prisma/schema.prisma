@@ -135,3 +135,28 @@ model ShopHiddenStyle {
 
   @@id([shopId, styleId])
 }
+
+/// 全局单份 KV 配置；当前只存生图价格 JSON。
+model SystemConfig {
+  key       String   @id
+  value     String
+  updatedAt DateTime @default(now()) @updatedAt
+  updatedBy String?
+
+  @@index([updatedAt])
+}
+
+/// 轻量配置变更审计；价格变更记录 beforeJson/afterJson。
+model ConfigAudit {
+  id           String   @id @default(cuid())
+  configKey    String
+  action       String
+  beforeJson   String?
+  afterJson    String?
+  operatorId   String
+  operatorName String
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([configKey, createdAt])
+}

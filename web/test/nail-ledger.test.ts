@@ -17,6 +17,9 @@ const db = new PrismaClient()
 const adminId = randomUUID()
 
 before(async () => {
+  // 共享库可能被上一次调试预置了价格行，先清掉以免污染默认扣点断言。
+  await db.systemConfig.deleteMany({ where: { key: 'generation_prices' } })
+  await db.configAudit.deleteMany({ where: { configKey: 'generation_prices' } })
   await db.user.create({
     data: { id: adminId, username: `admin-${adminId}`, passwordHash: 'test-only', role: 'admin' },
   })
@@ -106,11 +109,25 @@ test('VIP pricing, failure, timeout and late success preserve balance', async ()
   assert.equal(await finishGeneration(db, first.id, { success: false, reason: '上游失败' }), true)
   assert.equal(await finishGeneration(db, first.id, { success: false, reason: '重复退款' }), false)
   const second = await reserveGeneration(db, request(shop.id, user.id, randomUUID(), '4k'))
-  await db.generation.update({ where: { id: second.id }, data: { createdAt: new Date(Date.now() - 180_000) } })
+  await db.generation.update({ where: { id: second.id }, data: { createdAt: new Date(Date.now() - 240_000) } })
   assert.ok(await refundExpired(db) >= 1)
   assert.equal((await db.generation.findUniqueOrThrow({ where: { id: second.id } })).status, 'refunded')
   assert.equal(await finishGeneration(db, second.id, { success: true, outputPath: 'late.png' }), false)
   assert.equal((await db.shop.findUniqueOrThrow({ where: { id: shop.id } })).credits, 30)
+})
+
+test('timeout uses worker start time so an active image request is not refunded early', async () => {
+  const { shop, user } = await fixture()
+  await credit(shop.id, 100)
+  const task = await reserveGeneration(db, request(shop.id, user.id, randomUUID()))
+  await db.generation.update({
+    where: { id: task.id },
+    data: { createdAt: new Date(Date.now() - 240_000), workerStartedAt: new Date() },
+  })
+  await refundExpired(db)
+  assert.equal((await db.generation.findUniqueOrThrow({ where: { id: task.id } })).status, 'pending')
+  assert.equal(await finishGeneration(db, task.id, { success: true, outputPath: 'completed.png' }), true)
+  assert.equal((await db.shop.findUniqueOrThrow({ where: { id: shop.id } })).credits, 90)
 })
 
 test('insufficient balance rejects without creating a task', async () => {
@@ -196,4 +213,18 @@ test('only the active shop owner can manage its saved styles', async () => {
   await assert.rejects(changeShopStyle(db, { userId: user.id, shopId: otherShop.id, styleId }), /店老板/)
   await db.shop.update({ where: { id: otherShop.id }, data: { status: 'disabled' } })
   await assert.rejects(changeShopStyle(db, { userId: otherOwner.id, shopId: otherShop.id, styleId }), /店老板/)
+})
+
+test('no generation_prices row keeps the default 1K price of 10 points', async () => {
+  const { shop, user } = await fixture()
+  try {
+    await db.systemConfig.deleteMany({ where: { key: 'generation_prices' } })
+    await credit(shop.id, 100)
+    const task = await reserveGeneration(db, request(shop.id, user.id, randomUUID()))
+    assert.equal(task.creditsCost, 10)
+    assert.equal((await db.shop.findUniqueOrThrow({ where: { id: shop.id } })).credits, 90)
+  } finally {
+    // 用例内自行清理，避免残留价格行影响其它用例的默认定价。
+    await db.systemConfig.deleteMany({ where: { key: 'generation_prices' } })
+  }
 })
